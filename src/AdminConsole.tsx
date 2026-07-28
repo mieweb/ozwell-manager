@@ -32,6 +32,7 @@ import {
   ModelRef,
   MonthlyQuota,
   MonthlyQuotaUpdate,
+  UsageMetrics,
   demoteAdminUser,
   getAdminAgentQuota,
   getAdminSummary,
@@ -149,10 +150,6 @@ function metricTokens(user: AdminUser) {
 
 function metricRequests(user: AdminUser) {
   return user.metrics?.request_count ?? user.request_count ?? 0;
-}
-
-function topAgent(agents: AdminAgent[]) {
-  return [...agents].sort((a, b) => (b.metrics?.total_tokens || 0) - (a.metrics?.total_tokens || 0))[0] || null;
 }
 
 function userKey(user: AdminUser) {
@@ -578,6 +575,95 @@ function QuotaEditor({
   );
 }
 
+function QuotasModal({
+  user,
+  agents,
+  unattributedUsage,
+  onClose,
+}: {
+  user: AdminUser;
+  agents: AdminAgent[];
+  unattributedUsage?: UsageMetrics;
+  onClose: () => void;
+}) {
+  const name = displayName(user);
+  const showUnattributedUsage = (unattributedUsage?.request_count || 0) > 0;
+
+  return (
+    <Modal open onOpenChange={(open) => !open && onClose()} size="lg" aria-labelledby="admin-quotas-title">
+      <ModalHeader>
+        <div>
+          <p className="eyebrow">Monthly token quotas</p>
+          <ModalTitle id="admin-quotas-title">{name}'s quotas</ModalTitle>
+        </div>
+      </ModalHeader>
+      <ModalBody>
+        <div className="admin-quotas-modal">
+          <section className="admin-quota-modal-section">
+            <div className="admin-quota-modal-section-head">
+              <div>
+                <h4>User quota</h4>
+                <p className="admin-muted">Applies to this user's monthly token usage across agents.</p>
+              </div>
+            </div>
+            <QuotaEditor scope="user" scopeId={user.id} title="User monthly token quota" />
+          </section>
+
+          <section className="admin-quota-modal-section">
+            <div className="admin-quota-modal-section-head">
+              <div>
+                <h4>Agent quotas</h4>
+                <p className="admin-muted">Set optional monthly limits for individual agents.</p>
+              </div>
+              {agents.length > 0 && (
+                <Badge variant="outline" size="sm">
+                  {agents.length} agents
+                </Badge>
+              )}
+            </div>
+
+            {agents.length ? (
+              <div className="admin-agents-modal-list">
+                {agents.map((agent) => (
+                  <section className="admin-agent-control-row" key={agent.id} aria-label={`${agent.name || agent.id} quota controls`}>
+                    <div className="admin-agent-control-head">
+                      <div>
+                        <strong>{agent.name || agent.id}</strong>
+                        <span>{agent.model || 'No model recorded'}</span>
+                      </div>
+                      <div className="admin-agent-control-usage">
+                        <span>{formatTokens(agent.metrics?.total_tokens, agent.metrics?.request_count)}</span>
+                        <span>{formatRequests(agent.metrics?.request_count)}</span>
+                      </div>
+                    </div>
+                    <QuotaEditor scope="agent" scopeId={agent.id} title="Agent monthly token quota" />
+                  </section>
+                ))}
+              </div>
+            ) : (
+              <p className="admin-muted">No active agents.</p>
+            )}
+            {showUnattributedUsage && (
+              <div className="admin-unattributed-usage modal-note">
+                <div>
+                  <strong>Parent key usage</strong>
+                  <span>Not tied to a specific agent · {formatTokens(unattributedUsage?.total_tokens, unattributedUsage?.request_count)}</span>
+                </div>
+                <span>{formatRequests(unattributedUsage?.request_count)}</span>
+              </div>
+            )}
+          </section>
+        </div>
+      </ModalBody>
+      <ModalFooter>
+        <Button variant="secondary" type="button" onClick={onClose}>
+          Close
+        </Button>
+      </ModalFooter>
+    </Modal>
+  );
+}
+
 function ModelRestrictionsEditor({
   parentKey,
   allModels,
@@ -859,13 +945,16 @@ function Inspector({
   onClose: () => void;
   onConfirm: (action: ConfirmAction) => void;
 }) {
+  const [quotasOpen, setQuotasOpen] = useState(false);
+
   if (!detail) return null;
   const { user } = detail;
   const agents = detail.agents || [];
   const currentKey = user.current_parent_key || activeParentKey(detail.parent_keys);
-  const busiestAgent = topAgent(agents);
   const unattributedUsage = detail.unattributed_usage;
   const showUnattributedUsage = (unattributedUsage?.request_count || 0) > 0;
+  const agentTokenTotal = agents.reduce((total, agent) => total + (agent.metrics?.total_tokens || 0), 0);
+  const agentRequestTotal = agents.reduce((total, agent) => total + (agent.metrics?.request_count || 0), 0);
 
   return (
     <aside className="admin-inspector" aria-label={`Admin actions for ${displayName(user)}`}>
@@ -877,88 +966,45 @@ function Inspector({
             {user.email || user.username || 'No email'} · ID {user.external_user_id || user.id}
           </p>
         </div>
-        <Badge variant={user.is_admin ? 'success' : 'outline'} size="sm">
-          {user.is_admin ? 'Admin' : 'User'}
-        </Badge>
-        <Button variant="ghost" size="sm" type="button" aria-label="Close user inspector" onClick={onClose}>
-          <PanelRightClose aria-hidden="true" size={16} />
-        </Button>
+        <div className="admin-inspector-head-actions">
+          <Button variant="secondary" size="sm" type="button" onClick={() => setQuotasOpen(true)}>
+            Manage quotas
+          </Button>
+          <Badge variant={user.is_admin ? 'success' : 'outline'} size="sm">
+            {user.is_admin ? 'Admin' : 'User'}
+          </Badge>
+          <Button variant="ghost" size="sm" type="button" aria-label="Close user inspector" onClick={onClose}>
+            <PanelRightClose aria-hidden="true" size={16} />
+          </Button>
+        </div>
       </div>
 
       {loading ? (
         <SpinnerWithLabel label="Loading user details" />
       ) : (
         <>
-          <section className="admin-compact-panel" aria-label="Top agent by recorded tokens">
+          <section className="admin-inspector-section admin-quotas-summary" aria-label="Monthly token quota summary">
             <div>
-              <p className="eyebrow">Top agent by recorded tokens</p>
-              {busiestAgent ? (
-                <>
-                  <h4>{busiestAgent.name || busiestAgent.id}</h4>
-                  <p>{busiestAgent.model || 'No model recorded'}</p>
-                </>
-              ) : (
-                <>
-                  <h4>No agents yet</h4>
-                  <p>This user has no active agent usage to inspect.</p>
-                </>
-              )}
+              <h4>Monthly token quotas</h4>
+              <p className="admin-muted">
+                {agents.length
+                  ? `User quota and ${agents.length} agent quotas · ${formatTokens(agentTokenTotal, agentRequestTotal)}`
+                  : 'User quota controls.'}
+              </p>
+              {showUnattributedUsage && <p className="admin-muted">Parent key usage is not tied to a specific agent.</p>}
             </div>
-            {busiestAgent && (
-              <div className="admin-compact-grid">
-                <div>
-                  <span>Recorded tokens</span>
-                  <strong>{formatTokens(busiestAgent.metrics?.total_tokens, busiestAgent.metrics?.request_count)}</strong>
-                </div>
-                <div>
-                  <span>Total requests</span>
-                  <strong>{formatRequests(busiestAgent.metrics?.request_count)}</strong>
-                </div>
-                <div>
-                  <span>Last used</span>
-                  <strong>{formatDate(busiestAgent.metrics?.last_used_at)}</strong>
-                </div>
-              </div>
-            )}
+            <Button variant="secondary" size="sm" type="button" onClick={() => setQuotasOpen(true)}>
+              View quotas
+            </Button>
           </section>
 
           <UserActions user={user} currentKey={currentKey} onConfirm={onConfirm} />
-          <QuotaEditor scope="user" scopeId={user.id} title="User monthly token quota" />
           <CurrentKey parentKey={currentKey} />
           <ModelRestrictionsEditor parentKey={currentKey} allModels={allModels} />
 
-          <details className="admin-disclosure">
-            <summary>Agent usage</summary>
-            {agents.length || showUnattributedUsage ? (
-              <div className="admin-mini-list">
-                {agents.map((agent) => (
-                  <div className="admin-agent-quota-row" key={agent.id}>
-                    <div className="admin-agent-quota-summary">
-                      <div>
-                        <strong>{agent.name || agent.id}</strong>
-                        <span>
-                          {agent.model || 'No model'} · {formatTokens(agent.metrics?.total_tokens, agent.metrics?.request_count)}
-                        </span>
-                      </div>
-                      <span>{formatRequests(agent.metrics?.request_count)}</span>
-                    </div>
-                    <QuotaEditor scope="agent" scopeId={agent.id} title="Agent monthly token quota" />
-                  </div>
-                ))}
-                {showUnattributedUsage && (
-                  <div className="admin-unattributed-usage">
-                    <div>
-                      <strong>Parent key usage</strong>
-                      <span>Not tied to a specific agent · {formatTokens(unattributedUsage?.total_tokens, unattributedUsage?.request_count)}</span>
-                    </div>
-                    <span>{formatRequests(unattributedUsage?.request_count)}</span>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <p className="admin-muted">No active agents.</p>
-            )}
-          </details>
+          {quotasOpen && (
+            <QuotasModal user={user} agents={agents} unattributedUsage={unattributedUsage} onClose={() => setQuotasOpen(false)} />
+          )}
         </>
       )}
     </aside>

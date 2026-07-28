@@ -1205,6 +1205,14 @@ body {
   min-width: 0;
 }
 
+.admin-inspector-head-actions {
+  display: flex;
+  align-items: center;
+  justify-content: end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .admin-inspector-head h3 {
   margin: 0;
   color: var(--mieweb-foreground, #172033);
@@ -1235,42 +1243,18 @@ body {
   width: 100%;
 }
 
-.admin-compact-panel {
-  display: grid;
-  gap: 10px;
-  border-top: 1px solid var(--mieweb-border, #dce4ec);
-  border-bottom: 1px solid var(--mieweb-border, #dce4ec);
-  padding: 12px 0;
-}
-
-.admin-compact-panel h4 {
-  margin: 2px 0 0;
-  color: var(--mieweb-foreground, #172033);
-  font-size: 15px;
-  font-weight: 800;
-}
-
-.admin-compact-panel p:not(.eyebrow) {
-  margin: 3px 0 0;
-  color: var(--mieweb-muted-foreground, #667386);
-  font-size: 12px;
-}
-
-.admin-compact-grid,
 .admin-status-strip {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
-.admin-compact-grid div,
 .admin-status-strip div {
   display: grid;
   gap: 3px;
   min-width: 0;
 }
 
-.admin-compact-grid span,
 .admin-status-strip span {
   color: var(--mieweb-muted-foreground, #667386);
   font-size: 9px;
@@ -1279,7 +1263,6 @@ body {
   text-transform: uppercase;
 }
 
-.admin-compact-grid strong,
 .admin-status-strip strong {
   overflow: hidden;
   color: var(--mieweb-foreground, #172033);
@@ -1305,6 +1288,14 @@ body {
   color: var(--mieweb-foreground, #172033);
   font-size: 12px;
   font-weight: 780;
+}
+
+.admin-quotas-summary {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border-top: 1px solid var(--mieweb-border, #dce4ec);
+  border-bottom: 1px solid var(--mieweb-border, #dce4ec);
+  padding: 10px 0;
 }
 
 .admin-key-card {
@@ -1371,39 +1362,20 @@ body {
   white-space: nowrap;
 }
 
-.admin-mini-list {
-  display: grid;
-  gap: 6px;
-}
-
-.admin-mini-list > div {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  border-top: 1px solid var(--mieweb-border, #dce4ec);
-  padding-top: 7px;
-}
-
-.admin-mini-list > div:first-child {
-  border-top: 0;
-  padding-top: 0;
-}
-
-.admin-mini-list > .admin-unattributed-usage {
+.admin-unattributed-usage {
   border: 1px solid var(--mieweb-border, #dce4ec);
   border-radius: 6px;
   padding: 8px;
   background: var(--mieweb-muted, #f8fafc);
 }
 
-.admin-mini-list div div {
+.admin-unattributed-usage div {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
 
-.admin-mini-list strong {
+.admin-unattributed-usage strong {
   overflow: hidden;
   color: var(--mieweb-foreground, #172033);
   font-size: 12px;
@@ -1412,17 +1384,100 @@ body {
   white-space: nowrap;
 }
 
-.admin-mini-list > .admin-agent-quota-row {
-  display: grid;
-  align-items: stretch;
-  gap: 8px;
+.admin-unattributed-usage span {
+  color: var(--mieweb-muted-foreground, #667386);
+  font-size: 11px;
 }
 
-.admin-agent-quota-summary {
+.admin-unattributed-usage.modal-note {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  margin-top: 10px;
+}
+
+.admin-quotas-modal {
+  display: grid;
+  gap: 14px;
+  max-height: min(720px, calc(100vh - 240px));
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.admin-quota-modal-section {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.admin-quota-modal-section + .admin-quota-modal-section {
+  border-top: 1px solid var(--mieweb-border, #dce4ec);
+  padding-top: 12px;
+}
+
+.admin-quota-modal-section-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-quota-modal-section-head h4 {
+  margin: 0;
+  color: var(--mieweb-foreground, #172033);
+  font-size: 14px;
+  font-weight: 780;
+}
+
+.admin-agents-modal-list {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-agent-control-row {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--mieweb-border, #dce4ec);
+  border-radius: 6px;
+  padding: 10px;
+  background: var(--mieweb-card, #fff);
+}
+
+.admin-agent-control-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.admin-agent-control-head div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.admin-agent-control-head strong {
+  overflow: hidden;
+  color: var(--mieweb-foreground, #172033);
+  font-size: 13px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-agent-control-head span {
+  color: var(--mieweb-muted-foreground, #667386);
+  font-size: 11px;
+}
+
+.admin-agent-control-usage {
+  text-align: right;
+}
+
+.admin-agent-control-usage span {
+  white-space: nowrap;
 }
 
 .quota-editor {
@@ -1724,7 +1779,6 @@ body {
 
 @media (max-width: 1200px) {
   .admin-workspace,
-  .admin-compact-grid,
   .admin-status-strip,
   .admin-inspector-stats {
     grid-template-columns: 1fr;

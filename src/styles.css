@@ -1290,12 +1290,22 @@ body {
   font-weight: 780;
 }
 
-.admin-quotas-summary {
+.admin-section-title-row {
+  display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+  align-items: start;
+  gap: 10px;
+}
+
+.admin-usage-overview {
   border-top: 1px solid var(--mieweb-border, #dce4ec);
   border-bottom: 1px solid var(--mieweb-border, #dce4ec);
   padding: 10px 0;
+}
+
+.admin-controls-section {
+  border-top: 1px solid var(--mieweb-border, #dce4ec);
+  padding-top: 10px;
 }
 
 .admin-key-card {
@@ -1360,6 +1370,45 @@ body {
   font-weight: 740;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.admin-mini-list {
+  display: grid;
+  gap: 6px;
+}
+
+.admin-mini-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid var(--mieweb-border, #dce4ec);
+  padding-top: 7px;
+}
+
+.admin-mini-list > div:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.admin-mini-list div div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.admin-mini-list strong {
+  overflow: hidden;
+  color: var(--mieweb-foreground, #172033);
+  font-size: 12px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-mini-list span {
+  color: var(--mieweb-muted-foreground, #667386);
+  font-size: 11px;
 }
 
 .admin-unattributed-usage {

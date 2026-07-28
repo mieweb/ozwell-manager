@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   Badge,
   Button,
@@ -30,15 +30,21 @@ import {
   ApiError,
   ModelListItem,
   ModelRef,
+  MonthlyQuota,
+  MonthlyQuotaUpdate,
   demoteAdminUser,
+  getAdminAgentQuota,
   getAdminSummary,
   getAdminUser,
+  getAdminUserQuota,
   getModelRestrictions,
   listModels,
   listAdminUsers,
   promoteAdminUser,
   revokeAdminParentKey,
+  updateAdminAgentQuota,
   updateModelRestrictions,
+  updateAdminUserQuota,
 } from './api';
 
 type ConfirmAction = {
@@ -376,6 +382,202 @@ function CurrentKey({ parentKey }: { parentKey: AdminParentKey | null }) {
   );
 }
 
+function quotaWindow(quota: MonthlyQuota | null) {
+  if (!quota) return '-';
+  return `${formatDate(quota.window_start)} - ${formatDate(quota.window_end)}`;
+}
+
+function remainingQuota(quota: MonthlyQuota | null) {
+  if (!quota) return '-';
+  if (quota.remaining_tokens == null) return 'No limit';
+  return `${formatNumber(quota.remaining_tokens)} tokens`;
+}
+
+function quotaIsBlocked(quota: MonthlyQuota | null) {
+  return !!quota && quota.status === 'active' && (!quota.allowed || quota.remaining_tokens === 0);
+}
+
+function quotaStatusCopy(quota: MonthlyQuota | null, enabled: boolean) {
+  if (quotaIsBlocked(quota)) return 'Monthly quota exceeded.';
+  return enabled ? 'Monthly quota active.' : 'Monthly quota disabled.';
+}
+
+function quotaStatusLabel(quota: MonthlyQuota | null, enabled: boolean) {
+  if (quotaIsBlocked(quota)) return 'Exceeded';
+  return enabled ? 'Active' : 'Disabled';
+}
+
+function QuotaEditor({
+  scope,
+  scopeId,
+  title,
+}: {
+  scope: 'user' | 'agent';
+  scopeId: string;
+  title: string;
+}) {
+  const [quota, setQuota] = useState<MonthlyQuota | null>(null);
+  const [draftEnabled, setDraftEnabled] = useState(false);
+  const [limitValue, setLimitValue] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState('');
+  const blocked = quotaIsBlocked(quota);
+  const savedEnabled = quota?.status === 'active';
+  const normalizedLimit = quota?.monthly_token_limit == null ? '' : String(quota.monthly_token_limit);
+  const isDirty = !!quota && (draftEnabled !== savedEnabled || (draftEnabled && limitValue.trim() !== normalizedLimit));
+
+  async function loadQuota() {
+    setLoading(true);
+    setError('');
+    setSaved('');
+    try {
+      const nextQuota = scope === 'user' ? await getAdminUserQuota(scopeId) : await getAdminAgentQuota(scopeId);
+      setQuota(nextQuota);
+      setDraftEnabled(nextQuota.status === 'active');
+      setLimitValue(nextQuota.monthly_token_limit == null ? '' : String(nextQuota.monthly_token_limit));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Unable to load ${scope} quota.`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    setQuota(null);
+    setDraftEnabled(false);
+    setLimitValue('');
+    void loadQuota();
+  }, [scope, scopeId]);
+
+  async function saveQuota(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    setSaved('');
+
+    const trimmedLimit = limitValue.trim();
+    const parsedLimit = Number(trimmedLimit);
+
+    if (draftEnabled && (!trimmedLimit || !Number.isInteger(parsedLimit) || parsedLimit < 0)) {
+      setError('Enter a whole-number monthly token limit.');
+      setSaving(false);
+      return;
+    }
+
+    const nextUpdate: MonthlyQuotaUpdate = draftEnabled
+      ? { status: 'active', monthly_token_limit: parsedLimit }
+      : { status: 'disabled', monthly_token_limit: null };
+
+    try {
+      const nextQuota =
+        scope === 'user'
+          ? await updateAdminUserQuota(scopeId, nextUpdate)
+          : await updateAdminAgentQuota(scopeId, nextUpdate);
+      setQuota(nextQuota);
+      setDraftEnabled(nextQuota.status === 'active');
+      setLimitValue(nextQuota.monthly_token_limit == null ? '' : String(nextQuota.monthly_token_limit));
+      setSaved('Quota saved.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Unable to save ${scope} quota.`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleQuotaStatus() {
+    if (!quota) return;
+    setError('');
+    setSaved('');
+    setDraftEnabled((current) => !current);
+  }
+
+  return (
+    <form className={`quota-editor${blocked ? ' quota-blocked' : savedEnabled ? ' quota-active' : ''}`} onSubmit={saveQuota}>
+      <div className="quota-editor-head">
+        <div>
+          <h4>{title}</h4>
+          <p className="admin-muted">{quotaStatusCopy(quota, savedEnabled)}</p>
+        </div>
+        <Badge variant={blocked ? 'danger' : savedEnabled ? 'success' : 'outline'} size="sm">
+          {quotaStatusLabel(quota, savedEnabled)}
+        </Badge>
+      </div>
+
+      {loading ? (
+        <SpinnerWithLabel label={`Loading ${scope} quota`} />
+      ) : (
+        <>
+          <div className="quota-stats" aria-label={`${title} usage`}>
+            <div>
+              <span>Used</span>
+              <strong>{formatNumber(quota?.used_tokens || 0)}</strong>
+            </div>
+            <div>
+              <span>Remaining</span>
+              <strong>{remainingQuota(quota)}</strong>
+            </div>
+            <div>
+              <span>Requested</span>
+              <strong>{formatNumber(quota?.requested_tokens || 0)}</strong>
+            </div>
+          </div>
+
+          <div className="quota-window">
+            <span>Window</span>
+            <strong>{quotaWindow(quota)}</strong>
+          </div>
+
+          {blocked && <p className="quota-exceeded-copy">Monthly token quota exceeded.</p>}
+
+          <div className="quota-edit-row">
+            <label className="quota-limit-field">
+              <span>Monthly token limit</span>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                inputMode="numeric"
+                value={draftEnabled ? limitValue : ''}
+                disabled={!draftEnabled || saving}
+                onChange={(event) => {
+                  setLimitValue(event.target.value);
+                  setSaved('');
+                }}
+                placeholder={draftEnabled ? '100000' : 'No active monthly limit'}
+              />
+            </label>
+          </div>
+
+          {error && <p className="dialog-copy danger-copy">{error}</p>}
+          {saved && <p className="quota-saved-copy">{saved}</p>}
+
+          <div className="quota-actions">
+            <Button
+              variant={draftEnabled ? 'danger' : 'primary'}
+              size="sm"
+              type="button"
+              disabled={loading || saving || !quota}
+              onClick={toggleQuotaStatus}
+            >
+              {draftEnabled ? 'Disable quota' : 'Enable quota'}
+            </Button>
+            <Button variant="secondary" size="sm" type="button" disabled={loading || saving} onClick={loadQuota}>
+              Refresh
+            </Button>
+            {isDirty && (
+              <Button variant="primary" size="sm" type="submit" disabled={loading || saving}>
+                {saving ? 'Saving...' : 'Save quota'}
+              </Button>
+            )}
+          </div>
+        </>
+      )}
+    </form>
+  );
+}
+
 function ModelRestrictionsEditor({
   parentKey,
   allModels,
@@ -528,7 +730,7 @@ function ModelRestrictionsEditor({
             {saving ? 'Saving...' : 'Save'}
           </Button>
           <Button variant="secondary" size="sm" type="button" disabled={!parentKey || loading || saving} onClick={resetRestrictions}>
-            Reset
+            Reset model restrictions
           </Button>
         </div>
       </div>
@@ -721,6 +923,7 @@ function Inspector({
           </section>
 
           <UserActions user={user} currentKey={currentKey} onConfirm={onConfirm} />
+          <QuotaEditor scope="user" scopeId={user.id} title="User monthly token quota" />
           <CurrentKey parentKey={currentKey} />
           <ModelRestrictionsEditor parentKey={currentKey} allModels={allModels} />
 
@@ -729,14 +932,17 @@ function Inspector({
             {agents.length || showUnattributedUsage ? (
               <div className="admin-mini-list">
                 {agents.map((agent) => (
-                  <div key={agent.id}>
-                    <div>
-                      <strong>{agent.name || agent.id}</strong>
-                      <span>
-                        {agent.model || 'No model'} · {formatTokens(agent.metrics?.total_tokens, agent.metrics?.request_count)}
-                      </span>
+                  <div className="admin-agent-quota-row" key={agent.id}>
+                    <div className="admin-agent-quota-summary">
+                      <div>
+                        <strong>{agent.name || agent.id}</strong>
+                        <span>
+                          {agent.model || 'No model'} · {formatTokens(agent.metrics?.total_tokens, agent.metrics?.request_count)}
+                        </span>
+                      </div>
+                      <span>{formatRequests(agent.metrics?.request_count)}</span>
                     </div>
-                    <span>{formatRequests(agent.metrics?.request_count)}</span>
+                    <QuotaEditor scope="agent" scopeId={agent.id} title="Agent monthly token quota" />
                   </div>
                 ))}
                 {showUnattributedUsage && (

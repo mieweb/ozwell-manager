@@ -1208,7 +1208,7 @@ body {
 .admin-inspector-head-actions {
   display: flex;
   align-items: center;
-  justify-content: end;
+  justify-content: flex-end;
   flex-wrap: wrap;
   gap: 8px;
 }
@@ -1636,7 +1636,7 @@ body {
 .quota-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: end;
+  justify-content: flex-end;
   gap: 6px;
 }
 
@@ -1687,7 +1687,7 @@ body {
 .model-restrictions-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: end;
+  justify-content: flex-end;
   gap: 6px;
 }
 

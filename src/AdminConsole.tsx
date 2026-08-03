@@ -395,7 +395,7 @@ function quotaIsBlocked(quota: MonthlyQuota | null) {
 }
 
 function quotaStatusCopy(quota: MonthlyQuota | null, enabled: boolean) {
-  if (quotaIsBlocked(quota)) return 'Monthly quota exceeded.';
+  if (quotaIsBlocked(quota)) return 'Monthly token quota exceeded.';
   return enabled ? 'Monthly quota active.' : 'Monthly quota disabled.';
 }
 
@@ -422,6 +422,7 @@ function QuotaEditor({
   const [saved, setSaved] = useState('');
   const blocked = quotaIsBlocked(quota);
   const savedEnabled = quota?.status === 'active';
+  const displayedEnabled = quota ? draftEnabled : savedEnabled;
   const normalizedLimit = quota?.monthly_token_limit == null ? '' : String(quota.monthly_token_limit);
   const isDirty = !!quota && (draftEnabled !== savedEnabled || (draftEnabled && limitValue.trim() !== normalizedLimit));
 
@@ -491,14 +492,14 @@ function QuotaEditor({
   }
 
   return (
-    <form className={`quota-editor${blocked ? ' quota-blocked' : savedEnabled ? ' quota-active' : ''}`} onSubmit={saveQuota}>
+    <form className={`quota-editor${blocked ? ' quota-blocked' : displayedEnabled ? ' quota-active' : ''}`} onSubmit={saveQuota}>
       <div className="quota-editor-head">
         <div>
           <h4>{title}</h4>
-          <p className="admin-muted">{quotaStatusCopy(quota, savedEnabled)}</p>
+          <p className="admin-muted">{quotaStatusCopy(quota, displayedEnabled)}</p>
         </div>
-        <Badge variant={blocked ? 'danger' : savedEnabled ? 'success' : 'outline'} size="sm">
-          {quotaStatusLabel(quota, savedEnabled)}
+        <Badge variant={blocked ? 'danger' : displayedEnabled ? 'success' : 'outline'} size="sm">
+          {quotaStatusLabel(quota, displayedEnabled)}
         </Badge>
       </div>
 
@@ -953,8 +954,6 @@ function Inspector({
   const currentKey = user.current_parent_key || activeParentKey(detail.parent_keys);
   const unattributedUsage = detail.unattributed_usage;
   const showUnattributedUsage = (unattributedUsage?.request_count || 0) > 0;
-  const agentTokenTotal = agents.reduce((total, agent) => total + (agent.metrics?.total_tokens || 0), 0);
-  const agentRequestTotal = agents.reduce((total, agent) => total + (agent.metrics?.request_count || 0), 0);
 
   return (
     <aside className="admin-inspector" aria-label={`Admin actions for ${displayName(user)}`}>

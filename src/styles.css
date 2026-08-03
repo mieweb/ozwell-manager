@@ -1521,12 +1521,140 @@ body {
   font-size: 11px;
 }
 
+.admin-agent-control-actions {
+  display: flex;
+  align-items: start;
+  justify-content: end;
+  gap: 10px;
+  min-width: 0;
+}
+
 .admin-agent-control-usage {
   text-align: right;
 }
 
 .admin-agent-control-usage span {
   white-space: nowrap;
+}
+
+.admin-transfer-panel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--mieweb-danger, #b42318) 28%, var(--mieweb-border, #dce4ec));
+  border-radius: 6px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--mieweb-danger, #b42318) 4%, var(--mieweb-card, #fff));
+}
+
+.admin-transfer-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-transfer-summary div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid var(--mieweb-border, #dce4ec);
+  border-radius: 6px;
+  padding: 8px;
+  background: var(--mieweb-card, #fff);
+}
+
+.admin-transfer-summary span,
+.admin-transfer-field span {
+  color: var(--mieweb-muted-foreground, #667386);
+  font-size: 9px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-transfer-summary strong {
+  overflow: hidden;
+  color: var(--mieweb-foreground, #172033);
+  font-size: 12px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-transfer-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.admin-transfer-field input,
+.admin-transfer-field textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--mieweb-border, #dce4ec);
+  border-radius: 6px;
+  padding: 8px 9px;
+  background: var(--mieweb-card, #fff);
+  color: var(--mieweb-foreground, #172033);
+  font: inherit;
+  font-size: 12px;
+}
+
+.admin-transfer-field textarea {
+  resize: vertical;
+}
+
+.admin-destination-list {
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.admin-destination-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  border: 1px solid var(--mieweb-border, #dce4ec);
+  border-radius: 6px;
+  padding: 8px;
+  background: var(--mieweb-card, #fff);
+  color: inherit;
+  text-align: left;
+}
+
+.admin-destination-option:hover,
+.admin-destination-option:focus-visible,
+.admin-destination-option.selected {
+  border-color: var(--mieweb-primary, #2f6fed);
+  outline: none;
+}
+
+.admin-destination-option > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.admin-destination-option strong,
+.admin-destination-option small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-destination-option small {
+  color: var(--mieweb-muted-foreground, #667386);
+  font-size: 11px;
+}
+
+.admin-transfer-warning {
+  margin: 0;
+  color: var(--mieweb-danger, #b42318);
+  font-size: 12px;
+  font-weight: 650;
 }
 
 .quota-editor {

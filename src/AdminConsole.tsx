@@ -637,7 +637,13 @@ function AgentControlsModal({
       setDestinationUserId('');
       setReason('');
     } catch (err) {
-      setTransferError(err instanceof Error ? err.message : 'Agent transfer failed.');
+      setTransferError(
+        err instanceof ApiError && err.status === 403
+          ? 'Admin access is required to transfer agents. Refresh and try again.'
+          : err instanceof Error
+            ? err.message
+            : 'Agent transfer failed.',
+      );
     } finally {
       setTransferring(false);
     }
@@ -691,7 +697,7 @@ function AgentControlsModal({
                           <span>{formatTokens(agent.metrics?.total_tokens, agent.metrics?.request_count)}</span>
                           <span>{formatRequests(agent.metrics?.request_count)}</span>
                         </div>
-                        <Button variant="secondary" size="sm" type="button" onClick={() => beginTransfer(agent)}>
+                        <Button variant="secondary" size="sm" type="button" disabled={transferring} onClick={() => beginTransfer(agent)}>
                           Transfer
                         </Button>
                       </div>
@@ -809,7 +815,6 @@ function AgentControlsModal({
               </div>
             )}
           </section>
-
         </div>
       </ModalBody>
       <ModalFooter>
@@ -1306,7 +1311,10 @@ export function AdminConsole() {
   }
 
   async function refreshSelectedUser(userId: string) {
-    const nextUsers = await loadAdmin();
+    const [nextSummary, nextUsers, nextModels] = await Promise.all([getAdminSummary(), listAdminUsers(), listModels()]);
+    setSummary(nextSummary);
+    setUsers(nextUsers);
+    setModels(nextModels);
     const selected = nextUsers.find((user) => user.id === userId);
     if (selected) {
       setSelectedUserId(selected.id);

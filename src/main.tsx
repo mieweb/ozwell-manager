@@ -415,6 +415,16 @@ function legacyModelRef(agent: Pick<AgentDetail, 'default_model'> | Pick<AgentLi
   return firstModelRef(models);
 }
 
+function modelRefInList(ref: ModelRef | null, models: ModelListItem[]) {
+  return !!ref?.provider && !!ref.model && enabledModels(models).some((model) => modelKey(model) === modelKey(ref));
+}
+
+function normalizeDefaultModel(ref: ModelRef | null, models: ModelListItem[], fallback: ModelRef | null) {
+  if (modelRefInList(ref, models)) return { model: ref, changed: false };
+  const next = firstModelRef(models) || fallback;
+  return { model: next, changed: !!ref?.provider || !!ref?.model };
+}
+
 function refsToKeys(models: ModelRef[]) {
   return new Set(models.filter((model) => model.provider).map(selectionKey));
 }
@@ -473,9 +483,10 @@ function ModelAccessControls({
   const [filterQuery, setFilterQuery] = useState('');
   const groupedModels = useMemo(() => groupModelsByProvider(models), [models]);
   const providerNames = useMemo(() => Object.keys(groupedModels).sort(), [groupedModels]);
-  const selectedProvider = defaultModel?.provider || providerNames[0] || '';
+  const selectedProvider = defaultModel?.provider && groupedModels[defaultModel.provider] ? defaultModel.provider : providerNames[0] || '';
   const providerModels = groupedModels[selectedProvider] || [];
-  const selectedModel = defaultModel?.model || modelName(providerModels[0] || { id: '' });
+  const defaultModelAvailable = defaultModel ? providerModels.some((model) => modelKey(model) === modelKey(defaultModel)) : false;
+  const selectedModel = defaultModelAvailable ? defaultModel?.model || '' : modelName(providerModels[0] || { id: '' });
   const restricted = allowedKeys.size > 0;
 
   const filteredGrouped = useMemo(() => {
@@ -699,14 +710,18 @@ function AgentModelPolicyDialog({
   agent,
   models,
   onClose,
+  onSaved,
 }: {
   agent: Pick<AgentListItem, 'id' | 'name' | 'provider' | 'model' | 'default_model'>;
   models: ModelListItem[];
   onClose: () => void;
+  onSaved?: () => Promise<void>;
 }) {
   const [state, setState] = useState<LoadState>('loading');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [warning, setWarning] = useState('');
+  const [success, setSuccess] = useState('');
   const fallbackDefault = useMemo(() => legacyModelRef(agent, models), [agent, models]);
   const [defaultModel, setDefaultModel] = useState<ModelRef | null>(fallbackDefault);
   const [allowedKeys, setAllowedKeys] = useState<Set<string>>(new Set());
@@ -721,7 +736,9 @@ function AgentModelPolicyDialog({
       .then((payload) => {
         if (!active) return;
         setPolicy(payload);
-        setDefaultModel(payload.default_model || firstModelRef(payload.effective_models) || fallbackDefault);
+        const normalized = normalizeDefaultModel(payload.default_model, payload.effective_models, fallbackDefault);
+        setDefaultModel(normalized.model);
+        setWarning(normalized.changed ? 'Previous fallback model is no longer available. Choose and save a new fallback.' : '');
         setAllowedKeys(refsToKeys(payload.allowed_models));
         setState('ready');
       })
@@ -736,19 +753,26 @@ function AgentModelPolicyDialog({
   }, [agent.id, fallbackDefault]);
 
   function resetPolicy() {
-    setDefaultModel(policy?.default_model || firstModelRef(policy?.effective_models || []) || fallbackDefault);
+    const normalized = normalizeDefaultModel(policy?.default_model || null, policy?.effective_models || [], fallbackDefault);
+    setDefaultModel(normalized.model);
     setAllowedKeys(refsToKeys(policy?.allowed_models || []));
     setError('');
+    setWarning(normalized.changed ? 'Previous fallback model is no longer available. Choose and save a new fallback.' : '');
   }
 
   async function savePolicy() {
     setSaving(true);
     setError('');
+    setSuccess('');
     try {
       const saved = await updateAgentModelPolicy(agent.id, defaultModel, refsFromKeys(allowedKeys, modelOptions));
       setPolicy(saved);
-      setDefaultModel(saved.default_model || defaultModel);
+      const normalized = normalizeDefaultModel(saved.default_model, saved.effective_models, defaultModel);
+      setDefaultModel(normalized.model);
       setAllowedKeys(refsToKeys(saved.allowed_models));
+      setWarning('');
+      setSuccess('Provider and model settings updated.');
+      await onSaved?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed.');
     } finally {
@@ -764,9 +788,11 @@ function AgentModelPolicyDialog({
           <ModalTitle id="model-policy-title">{agent.name || agent.id}</ModalTitle>
         </div>
       </ModalHeader>
-      <ModalBody>
+      <ModalBody className="model-policy-modal-body">
         {state === 'loading' && <Notice>Loading model policy...</Notice>}
         {error && <Notice tone="danger">{error}</Notice>}
+        {warning && <Notice>{warning}</Notice>}
+        {success && <Notice tone="success">{success}</Notice>}
         {state === 'ready' && (
           <ModelAccessControls
             models={modelOptions}
@@ -800,6 +826,7 @@ function AgentEditorPage({
   models,
   onBack,
   onSubmitted,
+  onModelPolicySaved,
   onReveal,
   onRotate,
   onDelete,
@@ -810,12 +837,15 @@ function AgentEditorPage({
   models: ModelListItem[];
   onBack: () => void;
   onSubmitted: (agentId: string, key?: KeyResponse) => void;
+  onModelPolicySaved?: () => Promise<void>;
   onReveal: (agent: AgentDetail) => void;
   onRotate: (agent: AgentDetail) => void;
   onDelete: (agent: AgentDetail) => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [policyWarning, setPolicyWarning] = useState('');
+  const [policySuccess, setPolicySuccess] = useState('');
   const [policyLoading, setPolicyLoading] = useState(false);
   const [policy, setPolicy] = useState<AgentModelPolicyResponse | null>(null);
   const [createModels, setCreateModels] = useState<ModelListItem[]>([]);
@@ -838,6 +868,8 @@ function AgentEditorPage({
     setPolicy(null);
     setAllowedKeys(new Set());
     setDefaultModel(fallbackDefault);
+    setPolicyWarning('');
+    setPolicySuccess('');
     if (mode === 'create' || !agent) return undefined;
 
     setPolicyLoading(true);
@@ -845,8 +877,9 @@ function AgentEditorPage({
       .then((payload) => {
         if (!active) return;
         setPolicy(payload);
-        const nextDefault = payload.default_model || firstModelRef(payload.effective_models) || fallbackDefault;
-        setDefaultModel(nextDefault);
+        const normalized = normalizeDefaultModel(payload.default_model, payload.effective_models, fallbackDefault);
+        setDefaultModel(normalized.model);
+        setPolicyWarning(normalized.changed ? 'Previous fallback model is no longer available. Choose and save a new fallback.' : '');
         setAllowedKeys(refsToKeys(payload.allowed_models));
       })
       .catch((err) => {
@@ -922,9 +955,16 @@ function AgentEditorPage({
     if (!agent || hasConflict) return;
     setSavingPolicy(true);
     setError('');
+    setPolicySuccess('');
     try {
       const saved = await updateAgentModelPolicy(agent.agent_id, defaultModel, refsFromKeys(allowedKeys, modelOptions));
       setPolicy(saved);
+      const normalized = normalizeDefaultModel(saved.default_model, saved.effective_models, defaultModel);
+      setDefaultModel(normalized.model);
+      setAllowedKeys(refsToKeys(saved.allowed_models));
+      setPolicyWarning('');
+      setPolicySuccess('Provider and model settings updated.');
+      await onModelPolicySaved?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save model policy.');
     } finally {
@@ -970,10 +1010,12 @@ function AgentEditorPage({
         </div>
       </CardHeader>
 
-      {(saving || error || policyLoading) && (
+      {(saving || error || policyWarning || policySuccess || policyLoading) && (
         <div className="editor-notices">
           {saving && <Notice>{mode === 'create' ? 'Creating agent...' : 'Saving agent...'}</Notice>}
           {error && <Notice tone="danger">{error}</Notice>}
+          {policyWarning && <Notice>{policyWarning}</Notice>}
+          {policySuccess && <Notice tone="success">{policySuccess}</Notice>}
           {policyLoading && <Notice>Loading model policy...</Notice>}
         </div>
       )}
@@ -1009,9 +1051,12 @@ function AgentEditorPage({
               disabled={saving || savingPolicy}
               savingPolicy={savingPolicy}
               onReset={mode === 'edit' ? () => {
-                setDefaultModel(policy?.default_model || firstModelRef(policy?.effective_models || []) || fallbackDefault);
+                const normalized = normalizeDefaultModel(policy?.default_model || null, policy?.effective_models || [], fallbackDefault);
+                setDefaultModel(normalized.model);
                 setAllowedKeys(refsToKeys(policy?.allowed_models || []));
                 setError('');
+                setPolicyWarning(normalized.changed ? 'Previous fallback model is no longer available. Choose and save a new fallback.' : '');
+                setPolicySuccess('');
               } : undefined}
               onSave={mode === 'edit' && agent ? saveModelPolicy : undefined}
               onDefaultModelChange={setDefaultModel}
@@ -1038,6 +1083,7 @@ function NotificationBell() {
   const [notifications, setNotifications] = useState<ManagerNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [error, setError] = useState('');
+  const controlRef = useRef<HTMLDivElement | null>(null);
 
   async function loadNotifications() {
     setLoading(true);
@@ -1057,6 +1103,41 @@ function NotificationBell() {
     void loadNotifications();
   }, []);
 
+  useEffect(() => {
+    function refreshFromEvent() {
+      void loadNotifications();
+    }
+
+    window.addEventListener('ozwell:notifications-refresh', refreshFromEvent);
+    return () => window.removeEventListener('ozwell:notifications-refresh', refreshFromEvent);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    function onPointerDown(event: PointerEvent) {
+      if (!controlRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpen(false);
+    }
+
+    function closePanel() {
+      setOpen(false);
+    }
+
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    window.addEventListener('popstate', closePanel);
+
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('popstate', closePanel);
+    };
+  }, [open]);
+
   async function readOne(notificationId: string) {
     await markNotificationRead(notificationId);
     await loadNotifications();
@@ -1068,7 +1149,7 @@ function NotificationBell() {
   }
 
   return (
-    <div className="notification-control">
+    <div className="notification-control" ref={controlRef}>
       <div className="notification-bell-wrapper">
         <Button
           variant="secondary"
@@ -1592,6 +1673,7 @@ function App() {
             setSelectedAgent(null);
           }}
           onSubmitted={onSubmitted}
+          onModelPolicySaved={refreshAgents}
           onReveal={(agent) => setKeyDialog({ mode: 'reveal', agent })}
           onRotate={requestRotate}
           onDelete={removeAgent}
@@ -1612,6 +1694,7 @@ function App() {
           agent={modelPolicyDialogAgent}
           models={models}
           onClose={() => setModelPolicyDialogAgent(null)}
+          onSaved={refreshAgents}
         />
       )}
 

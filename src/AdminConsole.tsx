@@ -387,6 +387,7 @@ function ModelRestrictionsEditor({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [allowedKeys, setAllowedKeys] = useState<Set<string>>(new Set());
   const [unrestricted, setUnrestricted] = useState(true);
   const [effectiveModels, setEffectiveModels] = useState<ModelListItem[]>([]);
@@ -414,6 +415,7 @@ function ModelRestrictionsEditor({
     if (!parentKey) return;
     setLoading(true);
     setError('');
+    setSuccess('');
     try {
       const restrictions = await getModelRestrictions(parentKey.id);
       setAllowedKeys(new Set((restrictions.allowed_models || []).map(selectionKey)));
@@ -480,6 +482,7 @@ function ModelRestrictionsEditor({
     if (!parentKey) return;
     setSaving(true);
     setError('');
+    setSuccess('');
     try {
       const enabled = enabledModels(allModels);
       const providers = Array.from(new Set(enabled.map(modelProvider))).sort();
@@ -495,6 +498,8 @@ function ModelRestrictionsEditor({
       setAllowedKeys(new Set((saved.allowed_models || []).map(selectionKey)));
       setUnrestricted((saved.allowed_models || []).length === 0);
       setEffectiveModels(saved.effective_models || []);
+      setSuccess(nextKeys.size ? 'Model restrictions updated.' : 'Model restrictions reset.');
+      window.dispatchEvent(new Event('ozwell:notifications-refresh'));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to save model restrictions.');
     } finally {
@@ -531,6 +536,7 @@ function ModelRestrictionsEditor({
       {!parentKey && <p className="admin-muted">No active Ozwell key.</p>}
       {parentKey && loading && <SpinnerWithLabel label="Loading model restrictions" />}
       {error && <p className="dialog-copy danger-copy">{error}</p>}
+      {success && <p className="dialog-copy success-copy">{success}</p>}
 
       {parentKey && providerNames.length > 0 && (
         <>

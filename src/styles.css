@@ -501,10 +501,25 @@ body {
 .agent-model-controls {
   display: grid;
   gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
   min-width: 0;
   border-bottom: 1px solid var(--mieweb-border, #dce4ec);
   padding: 14px 16px;
   background: color-mix(in srgb, var(--mieweb-muted, #f8fafc) 58%, var(--mieweb-card, #fff));
+}
+
+.model-policy-modal-body {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  overflow-x: hidden;
+}
+
+.model-policy-modal-body > * {
+  width: min(100%, 860px);
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .agent-model-conflict-warning {
@@ -545,7 +560,7 @@ body {
 
 .agent-model-defaults {
   display: grid;
-  grid-template-columns: repeat(2, minmax(180px, 260px));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -554,6 +569,7 @@ body {
 .model-provider-toggle {
   display: grid;
   gap: 4px;
+  min-width: 0;
   color: var(--mieweb-foreground, #172033);
   font-size: 13px;
   font-weight: 500;
@@ -656,6 +672,7 @@ body {
 }
 
 .agent-model-mode-btn {
+  min-width: 0;
   flex: 1;
   display: flex;
   align-items: center;
@@ -909,6 +926,10 @@ body {
   color: var(--mieweb-muted-foreground, #667386);
   font-size: 14px;
   line-height: 1.5;
+}
+
+.success-copy {
+  color: var(--mieweb-success, #15803d);
 }
 
 .claim-key-field {

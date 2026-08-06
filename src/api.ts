@@ -21,7 +21,11 @@ export type AgentListItem = {
   id: string;
   key_hint?: string;
   name?: string;
+  provider?: string;
   model?: string;
+  default_model?: ModelRef | null;
+  model_policy_updated_at?: number | string | null;
+  model_policy_source?: 'db' | 'legacy_yaml' | 'none';
   tools?: unknown;
   behavior?: unknown;
   created_at?: number;
@@ -34,7 +38,11 @@ export type AgentDetail = {
   yaml: string;
   name?: string;
   instructions?: string;
+  provider?: string;
   model?: string;
+  default_model?: ModelRef | null;
+  model_policy_updated_at?: number | string | null;
+  model_policy_source?: 'db' | 'legacy_yaml' | 'none';
   temperature?: number;
   tools?: unknown;
   behavior?: unknown;
@@ -57,6 +65,47 @@ export type ParentKeyResponse = {
 
 export type ModelListItem = {
   id: string;
+  provider?: string;
+  model?: string;
+  label?: string;
+  source?: string;
+  enabled?: boolean;
+  last_discovered_at?: number | string | null;
+};
+
+export type ModelRef = {
+  provider: string;
+  model?: string | null;
+};
+
+export type ModelRestrictionsResponse = {
+  parent_key_id: string;
+  allowed_models: ModelRef[];
+  effective_models: ModelListItem[];
+};
+
+export type AgentModelPolicyResponse = {
+  agent_id: string;
+  default_model: ModelRef | null;
+  allowed_models: ModelRef[];
+  source: 'db' | 'legacy_yaml' | 'none';
+  model_policy_updated_at?: number | string | null;
+  effective_models: ModelListItem[];
+};
+
+export type ManagerNotification = {
+  id: string;
+  type?: string;
+  message?: string;
+  metadata?: unknown;
+  created_at?: number | string | null;
+  read_at?: number | string | null;
+};
+
+export type NotificationsResponse = {
+  object?: string;
+  unread_count: number;
+  data: ManagerNotification[];
 };
 
 export type UsageMetrics = {
@@ -143,6 +192,7 @@ export class ApiError extends Error {
 
 const configuredBaseUrl = import.meta.env.VITE_OZWELL_API_BASE_URL || '';
 export const apiBaseUrl = configuredBaseUrl.replace(/\/+$/, '');
+const requestTimeoutMs = Number(import.meta.env.VITE_OZWELL_API_TIMEOUT_MS || 20000);
 
 async function parseResponse(response: Response) {
   const text = await response.text();
@@ -164,13 +214,30 @@ function errorMessage(payload: unknown, fallback: string) {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    ...init,
-    headers: {
-      Accept: 'application/json',
-      ...init.headers,
-    },
-  });
+  const controller = init.signal ? null : new AbortController();
+  const timeout = controller
+    ? globalThis.setTimeout(() => controller.abort(), requestTimeoutMs)
+    : null;
+  let response: Response;
+
+  try {
+    response = await fetch(`${apiBaseUrl}${path}`, {
+      ...init,
+      signal: init.signal || controller?.signal,
+      headers: {
+        Accept: 'application/json',
+        ...init.headers,
+      },
+    });
+  } catch (err) {
+    if (controller?.signal.aborted) {
+      throw new ApiError('Request timed out. Try refreshing and retrying the action.', 0, 'request_timeout');
+    }
+    throw err;
+  } finally {
+    if (timeout) globalThis.clearTimeout(timeout);
+  }
+
   const payload = await parseResponse(response);
 
   if (!response.ok) {
@@ -213,6 +280,20 @@ export function updateAgent(agentId: string, yaml: string) {
   });
 }
 
+export function getAgentModelPolicy(agentId: string) {
+  return request<AgentModelPolicyResponse>(`/v1/manager/agents/${encodeURIComponent(agentId)}/model-policy`, {
+    cache: 'no-store',
+  });
+}
+
+export function updateAgentModelPolicy(agentId: string, defaultModel: ModelRef | null, allowedModels: ModelRef[]) {
+  return request<AgentModelPolicyResponse>(`/v1/manager/agents/${encodeURIComponent(agentId)}/model-policy`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ default_model: defaultModel, allowed_models: allowedModels }),
+  });
+}
+
 export function revealAgentKey(agentId: string) {
   return request<KeyResponse>(`/v1/manager/agents/${encodeURIComponent(agentId)}/reveal-key`, {
     method: 'POST',
@@ -233,6 +314,14 @@ export function deleteAgent(agentId: string) {
 
 export async function listModels() {
   const payload = await request<{ data?: ModelListItem[] }>('/v1/manager/models', { cache: 'no-store' });
+  return payload.data || [];
+}
+
+export async function listEffectiveModels(parentKey: string) {
+  const payload = await request<{ data?: ModelListItem[] }>('/v1/models/effective', {
+    cache: 'no-store',
+    headers: { Authorization: `Bearer ${parentKey}` },
+  });
   return payload.data || [];
 }
 
@@ -284,4 +373,38 @@ export function revokeAdminParentKey(keyId: string, reason = 'admin_revoked') {
       body: JSON.stringify({ reason }),
     },
   );
+}
+
+export function getModelRestrictions(parentKeyId: string) {
+  return request<ModelRestrictionsResponse>(
+    `/v1/manager/admin/parent-keys/${encodeURIComponent(parentKeyId)}/model-restrictions`,
+    { cache: 'no-store' },
+  );
+}
+
+export function updateModelRestrictions(parentKeyId: string, allowedModels: ModelRef[]) {
+  return request<ModelRestrictionsResponse>(
+    `/v1/manager/admin/parent-keys/${encodeURIComponent(parentKeyId)}/model-restrictions`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ allowed_models: allowedModels }),
+    },
+  );
+}
+
+export function listNotifications() {
+  return request<NotificationsResponse>('/v1/manager/notifications', { cache: 'no-store' });
+}
+
+export function markNotificationRead(notificationId: string) {
+  return request<ManagerNotification>(`/v1/manager/notifications/${encodeURIComponent(notificationId)}/read`, {
+    method: 'POST',
+  });
+}
+
+export function markAllNotificationsRead() {
+  return request<{ updated: number }>('/v1/manager/notifications/read-all', {
+    method: 'POST',
+  });
 }

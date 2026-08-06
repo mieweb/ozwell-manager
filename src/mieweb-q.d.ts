@@ -11,4 +11,6 @@ declare module '@mieweb/q' {
   };
 
   export const AgentConfigGenerator: ComponentType<AgentConfigGeneratorProps>;
+  export function configToYaml(config: Record<string, unknown>): string;
+  export function yamlToConfig(yaml: string): Record<string, unknown>;
 }

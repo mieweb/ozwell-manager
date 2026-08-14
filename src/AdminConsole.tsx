@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   Badge,
   Button,
@@ -30,15 +30,22 @@ import {
   ApiError,
   ModelListItem,
   ModelRef,
+  MonthlyQuota,
+  MonthlyQuotaUpdate,
+  UsageMetrics,
   demoteAdminUser,
+  getAdminAgentQuota,
   getAdminSummary,
   getAdminUser,
+  getAdminUserQuota,
   getModelRestrictions,
   listModels,
   listAdminUsers,
   promoteAdminUser,
   revokeAdminParentKey,
+  updateAdminAgentQuota,
   updateModelRestrictions,
+  updateAdminUserQuota,
 } from './api';
 
 type ConfirmAction = {
@@ -143,10 +150,6 @@ function metricTokens(user: AdminUser) {
 
 function metricRequests(user: AdminUser) {
   return user.metrics?.request_count ?? user.request_count ?? 0;
-}
-
-function topAgent(agents: AdminAgent[]) {
-  return [...agents].sort((a, b) => (b.metrics?.total_tokens || 0) - (a.metrics?.total_tokens || 0))[0] || null;
 }
 
 function userKey(user: AdminUser) {
@@ -376,6 +379,292 @@ function CurrentKey({ parentKey }: { parentKey: AdminParentKey | null }) {
   );
 }
 
+function quotaWindow(quota: MonthlyQuota | null) {
+  if (!quota) return '-';
+  return `${formatDate(quota.window_start)} - ${formatDate(quota.window_end)}`;
+}
+
+function remainingQuota(quota: MonthlyQuota | null) {
+  if (!quota) return '-';
+  if (quota.remaining_tokens == null) return 'No limit';
+  return `${formatNumber(quota.remaining_tokens)} tokens`;
+}
+
+function quotaIsBlocked(quota: MonthlyQuota | null) {
+  return !!quota && quota.status === 'active' && (!quota.allowed || quota.remaining_tokens === 0);
+}
+
+function quotaStatusCopy(quota: MonthlyQuota | null, enabled: boolean) {
+  if (quotaIsBlocked(quota)) return 'Monthly token quota exceeded.';
+  return enabled ? 'Monthly quota active.' : 'Monthly quota disabled.';
+}
+
+function quotaStatusLabel(quota: MonthlyQuota | null, enabled: boolean) {
+  if (quotaIsBlocked(quota)) return 'Exceeded';
+  return enabled ? 'Active' : 'Disabled';
+}
+
+function QuotaEditor({
+  scope,
+  scopeId,
+  title,
+}: {
+  scope: 'user' | 'agent';
+  scopeId: string;
+  title: string;
+}) {
+  const [quota, setQuota] = useState<MonthlyQuota | null>(null);
+  const [draftEnabled, setDraftEnabled] = useState(false);
+  const [limitValue, setLimitValue] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState('');
+  const blocked = quotaIsBlocked(quota);
+  const savedEnabled = quota?.status === 'active';
+  const displayedEnabled = quota ? draftEnabled : savedEnabled;
+  const normalizedLimit = quota?.monthly_token_limit == null ? '' : String(quota.monthly_token_limit);
+  const isDirty = !!quota && (draftEnabled !== savedEnabled || (draftEnabled && limitValue.trim() !== normalizedLimit));
+
+  async function loadQuota() {
+    setLoading(true);
+    setError('');
+    setSaved('');
+    try {
+      const nextQuota = scope === 'user' ? await getAdminUserQuota(scopeId) : await getAdminAgentQuota(scopeId);
+      setQuota(nextQuota);
+      setDraftEnabled(nextQuota.status === 'active');
+      setLimitValue(nextQuota.monthly_token_limit == null ? '' : String(nextQuota.monthly_token_limit));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Unable to load ${scope} quota.`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    setQuota(null);
+    setDraftEnabled(false);
+    setLimitValue('');
+    void loadQuota();
+  }, [scope, scopeId]);
+
+  async function saveQuota(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    setSaved('');
+
+    const trimmedLimit = limitValue.trim();
+    const parsedLimit = Number(trimmedLimit);
+
+    if (draftEnabled && (!trimmedLimit || !Number.isInteger(parsedLimit) || parsedLimit < 0)) {
+      setError('Enter a whole-number monthly token limit.');
+      setSaving(false);
+      return;
+    }
+
+    const nextUpdate: MonthlyQuotaUpdate = draftEnabled
+      ? { status: 'active', monthly_token_limit: parsedLimit }
+      : { status: 'disabled', monthly_token_limit: null };
+
+    try {
+      const nextQuota =
+        scope === 'user'
+          ? await updateAdminUserQuota(scopeId, nextUpdate)
+          : await updateAdminAgentQuota(scopeId, nextUpdate);
+      setQuota(nextQuota);
+      setDraftEnabled(nextQuota.status === 'active');
+      setLimitValue(nextQuota.monthly_token_limit == null ? '' : String(nextQuota.monthly_token_limit));
+      setSaved('Quota saved.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Unable to save ${scope} quota.`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleQuotaStatus() {
+    if (!quota) return;
+    setError('');
+    setSaved('');
+    setDraftEnabled((current) => !current);
+  }
+
+  return (
+    <form className={`quota-editor${blocked ? ' quota-blocked' : displayedEnabled ? ' quota-active' : ''}`} onSubmit={saveQuota}>
+      <div className="quota-editor-head">
+        <div>
+          <h4>{title}</h4>
+          <p className="admin-muted">{quotaStatusCopy(quota, displayedEnabled)}</p>
+        </div>
+        <Badge variant={blocked ? 'danger' : displayedEnabled ? 'success' : 'outline'} size="sm">
+          {quotaStatusLabel(quota, displayedEnabled)}
+        </Badge>
+      </div>
+
+      {loading ? (
+        <SpinnerWithLabel label={`Loading ${scope} quota`} />
+      ) : (
+        <>
+          <div className="quota-stats" aria-label={`${title} usage`}>
+            <div>
+              <span>Used</span>
+              <strong>{formatNumber(quota?.used_tokens || 0)}</strong>
+            </div>
+            <div>
+              <span>Remaining</span>
+              <strong>{remainingQuota(quota)}</strong>
+            </div>
+            <div>
+              <span>Requested</span>
+              <strong>{formatNumber(quota?.requested_tokens || 0)}</strong>
+            </div>
+          </div>
+
+          <div className="quota-window">
+            <span>Window</span>
+            <strong>{quotaWindow(quota)}</strong>
+          </div>
+
+          {blocked && <p className="quota-exceeded-copy">Monthly token quota exceeded.</p>}
+
+          <div className="quota-edit-row">
+            <label className="quota-limit-field">
+              <span>Monthly token limit</span>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                inputMode="numeric"
+                value={draftEnabled ? limitValue : ''}
+                disabled={!draftEnabled || saving}
+                onChange={(event) => {
+                  setLimitValue(event.target.value);
+                  setSaved('');
+                }}
+                placeholder={draftEnabled ? '100000' : 'No active monthly limit'}
+              />
+            </label>
+          </div>
+
+          {error && <p className="dialog-copy danger-copy">{error}</p>}
+          {saved && <p className="quota-saved-copy">{saved}</p>}
+
+          <div className="quota-actions">
+            <Button
+              variant={draftEnabled ? 'danger' : 'primary'}
+              size="sm"
+              type="button"
+              disabled={loading || saving || !quota}
+              onClick={toggleQuotaStatus}
+            >
+              {draftEnabled ? 'Disable quota' : 'Enable quota'}
+            </Button>
+            <Button variant="secondary" size="sm" type="button" disabled={loading || saving} onClick={loadQuota}>
+              Refresh
+            </Button>
+            {isDirty && (
+              <Button variant="primary" size="sm" type="submit" disabled={loading || saving}>
+                {saving ? 'Saving...' : 'Save quota'}
+              </Button>
+            )}
+          </div>
+        </>
+      )}
+    </form>
+  );
+}
+
+function QuotasModal({
+  user,
+  agents,
+  unattributedUsage,
+  onClose,
+}: {
+  user: AdminUser;
+  agents: AdminAgent[];
+  unattributedUsage?: UsageMetrics;
+  onClose: () => void;
+}) {
+  const name = displayName(user);
+  const showUnattributedUsage = (unattributedUsage?.request_count || 0) > 0;
+
+  return (
+    <Modal open onOpenChange={(open) => !open && onClose()} size="lg" aria-labelledby="admin-quotas-title">
+      <ModalHeader>
+        <div>
+          <p className="eyebrow">Monthly token quotas</p>
+          <ModalTitle id="admin-quotas-title">{name}'s quotas</ModalTitle>
+        </div>
+      </ModalHeader>
+      <ModalBody>
+        <div className="admin-quotas-modal">
+          <section className="admin-quota-modal-section">
+            <div className="admin-quota-modal-section-head">
+              <div>
+                <h4>User quota</h4>
+                <p className="admin-muted">Applies to this user's monthly token usage across agents.</p>
+              </div>
+            </div>
+            <QuotaEditor scope="user" scopeId={user.id} title="User monthly token quota" />
+          </section>
+
+          <section className="admin-quota-modal-section">
+            <div className="admin-quota-modal-section-head">
+              <div>
+                <h4>Agent quotas</h4>
+                <p className="admin-muted">Set optional monthly limits for individual agents.</p>
+              </div>
+              {agents.length > 0 && (
+                <Badge variant="outline" size="sm">
+                  {agents.length} agents
+                </Badge>
+              )}
+            </div>
+
+            {agents.length ? (
+              <div className="admin-agents-modal-list">
+                {agents.map((agent) => (
+                  <section className="admin-agent-control-row" key={agent.id} aria-label={`${agent.name || agent.id} quota controls`}>
+                    <div className="admin-agent-control-head">
+                      <div>
+                        <strong>{agent.name || agent.id}</strong>
+                        <span>{agent.model || 'No model recorded'}</span>
+                      </div>
+                      <div className="admin-agent-control-usage">
+                        <span>{formatTokens(agent.metrics?.total_tokens, agent.metrics?.request_count)}</span>
+                        <span>{formatRequests(agent.metrics?.request_count)}</span>
+                      </div>
+                    </div>
+                    <QuotaEditor scope="agent" scopeId={agent.id} title="Agent monthly token quota" />
+                  </section>
+                ))}
+              </div>
+            ) : (
+              <p className="admin-muted">No active agents.</p>
+            )}
+            {showUnattributedUsage && (
+              <div className="admin-unattributed-usage modal-note">
+                <div>
+                  <strong>Unattributed usage</strong>
+                  <span>Not tied to a specific agent · {formatTokens(unattributedUsage?.total_tokens, unattributedUsage?.request_count)}</span>
+                </div>
+                <span>{formatRequests(unattributedUsage?.request_count)}</span>
+              </div>
+            )}
+          </section>
+        </div>
+      </ModalBody>
+      <ModalFooter>
+        <Button variant="secondary" type="button" onClick={onClose}>
+          Close
+        </Button>
+      </ModalFooter>
+    </Modal>
+  );
+}
+
 function ModelRestrictionsEditor({
   parentKey,
   allModels,
@@ -528,7 +817,7 @@ function ModelRestrictionsEditor({
             {saving ? 'Saving...' : 'Save'}
           </Button>
           <Button variant="secondary" size="sm" type="button" disabled={!parentKey || loading || saving} onClick={resetRestrictions}>
-            Reset
+            Reset model restrictions
           </Button>
         </div>
       </div>
@@ -657,11 +946,12 @@ function Inspector({
   onClose: () => void;
   onConfirm: (action: ConfirmAction) => void;
 }) {
+  const [quotasOpen, setQuotasOpen] = useState(false);
+
   if (!detail) return null;
   const { user } = detail;
   const agents = detail.agents || [];
   const currentKey = user.current_parent_key || activeParentKey(detail.parent_keys);
-  const busiestAgent = topAgent(agents);
   const unattributedUsage = detail.unattributed_usage;
   const showUnattributedUsage = (unattributedUsage?.request_count || 0) > 0;
 
@@ -675,84 +965,91 @@ function Inspector({
             {user.email || user.username || 'No email'} · ID {user.external_user_id || user.id}
           </p>
         </div>
-        <Badge variant={user.is_admin ? 'success' : 'outline'} size="sm">
-          {user.is_admin ? 'Admin' : 'User'}
-        </Badge>
-        <Button variant="ghost" size="sm" type="button" aria-label="Close user inspector" onClick={onClose}>
-          <PanelRightClose aria-hidden="true" size={16} />
-        </Button>
+        <div className="admin-inspector-head-actions">
+          <Badge variant={user.is_admin ? 'success' : 'outline'} size="sm">
+            {user.is_admin ? 'Admin' : 'User'}
+          </Badge>
+          <Button variant="ghost" size="sm" type="button" aria-label="Close user inspector" onClick={onClose}>
+            <PanelRightClose aria-hidden="true" size={16} />
+          </Button>
+        </div>
       </div>
 
       {loading ? (
         <SpinnerWithLabel label="Loading user details" />
       ) : (
         <>
-          <section className="admin-compact-panel" aria-label="Top agent by recorded tokens">
-            <div>
-              <p className="eyebrow">Top agent by recorded tokens</p>
-              {busiestAgent ? (
-                <>
-                  <h4>{busiestAgent.name || busiestAgent.id}</h4>
-                  <p>{busiestAgent.model || 'No model recorded'}</p>
-                </>
-              ) : (
-                <>
-                  <h4>No agents yet</h4>
-                  <p>This user has no active agent usage to inspect.</p>
-                </>
-              )}
-            </div>
-            {busiestAgent && (
-              <div className="admin-compact-grid">
-                <div>
-                  <span>Recorded tokens</span>
-                  <strong>{formatTokens(busiestAgent.metrics?.total_tokens, busiestAgent.metrics?.request_count)}</strong>
-                </div>
-                <div>
-                  <span>Total requests</span>
-                  <strong>{formatRequests(busiestAgent.metrics?.request_count)}</strong>
-                </div>
-                <div>
-                  <span>Last used</span>
-                  <strong>{formatDate(busiestAgent.metrics?.last_used_at)}</strong>
-                </div>
+          <section className="admin-inspector-section admin-usage-overview" aria-label="Usage overview">
+            <div className="admin-section-title-row">
+              <div>
+                <h4>Usage</h4>
+                <p className="admin-muted">
+                  Monthly quotas cover this user and {agents.length ? `${agents.length} agent scopes.` : 'their future agents.'}
+                </p>
               </div>
-            )}
+              <Button variant="secondary" size="sm" type="button" onClick={() => setQuotasOpen(true)}>
+                Manage quotas
+              </Button>
+            </div>
+
+            <div className="admin-status-strip">
+              <div>
+                <span>Recorded tokens</span>
+                <strong>{formatNumber(metricTokens(user))}</strong>
+              </div>
+              <div>
+                <span>Requests</span>
+                <strong>{formatNumber(metricRequests(user))}</strong>
+              </div>
+              <div>
+                <span>Unattributed</span>
+                <strong>{formatNumber(unattributedUsage?.total_tokens || 0)}</strong>
+              </div>
+            </div>
+
+            <details className="admin-disclosure">
+              <summary>Usage breakdown</summary>
+              {agents.length || showUnattributedUsage ? (
+                <div className="admin-mini-list">
+                  {agents.map((agent) => (
+                    <div key={agent.id}>
+                      <div>
+                        <strong>{agent.name || agent.id}</strong>
+                        <span>
+                          {agent.model || 'No model'} · {formatTokens(agent.metrics?.total_tokens, agent.metrics?.request_count)}
+                        </span>
+                      </div>
+                      <span>{formatRequests(agent.metrics?.request_count)}</span>
+                  </div>
+                  ))}
+                  {showUnattributedUsage && (
+                    <div className="admin-unattributed-usage">
+                      <div>
+                        <strong>Unattributed usage</strong>
+                        <span>Not tied to a specific agent · {formatTokens(unattributedUsage?.total_tokens, unattributedUsage?.request_count)}</span>
+                      </div>
+                      <span>{formatRequests(unattributedUsage?.request_count)}</span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="admin-muted">No active agent usage.</p>
+              )}
+            </details>
           </section>
 
-          <UserActions user={user} currentKey={currentKey} onConfirm={onConfirm} />
           <CurrentKey parentKey={currentKey} />
+
+          <section className="admin-inspector-section admin-controls-section">
+            <h4>Admin controls</h4>
+            <UserActions user={user} currentKey={currentKey} onConfirm={onConfirm} />
+          </section>
+
           <ModelRestrictionsEditor parentKey={currentKey} allModels={allModels} />
 
-          <details className="admin-disclosure">
-            <summary>Agent usage</summary>
-            {agents.length || showUnattributedUsage ? (
-              <div className="admin-mini-list">
-                {agents.map((agent) => (
-                  <div key={agent.id}>
-                    <div>
-                      <strong>{agent.name || agent.id}</strong>
-                      <span>
-                        {agent.model || 'No model'} · {formatTokens(agent.metrics?.total_tokens, agent.metrics?.request_count)}
-                      </span>
-                    </div>
-                    <span>{formatRequests(agent.metrics?.request_count)}</span>
-                  </div>
-                ))}
-                {showUnattributedUsage && (
-                  <div className="admin-unattributed-usage">
-                    <div>
-                      <strong>Parent key usage</strong>
-                      <span>Not tied to a specific agent · {formatTokens(unattributedUsage?.total_tokens, unattributedUsage?.request_count)}</span>
-                    </div>
-                    <span>{formatRequests(unattributedUsage?.request_count)}</span>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <p className="admin-muted">No active agents.</p>
-            )}
-          </details>
+          {quotasOpen && (
+            <QuotasModal user={user} agents={agents} unattributedUsage={unattributedUsage} onClose={() => setQuotasOpen(false)} />
+          )}
         </>
       )}
     </aside>

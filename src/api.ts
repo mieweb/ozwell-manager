@@ -178,6 +178,26 @@ export type AdminUserDetail = {
   unattributed_usage?: UsageMetrics;
 };
 
+export type MonthlyQuotaStatus = 'active' | 'disabled';
+
+export type MonthlyQuota = {
+  scope_type: 'user' | 'agent';
+  scope_id: string;
+  monthly_token_limit: number | null;
+  status: MonthlyQuotaStatus;
+  used_tokens: number;
+  remaining_tokens: number | null;
+  requested_tokens: number;
+  window_start: string;
+  window_end: string;
+  allowed: boolean;
+};
+
+export type MonthlyQuotaUpdate = {
+  monthly_token_limit?: number | null;
+  status: MonthlyQuotaStatus;
+};
+
 export class ApiError extends Error {
   status: number;
   code?: string;
@@ -207,7 +227,8 @@ async function parseResponse(response: Response) {
 
 function errorMessage(payload: unknown, fallback: string) {
   if (payload && typeof payload === 'object' && 'error' in payload) {
-    const error = (payload as { error?: { message?: string } }).error;
+    const error = (payload as { error?: { code?: string; message?: string } }).error;
+    if (error?.code === 'quota_exceeded') return 'Monthly token quota exceeded.';
     if (error?.message) return error.message;
   }
   return fallback;
@@ -350,6 +371,30 @@ export async function listAdminUsers() {
 
 export function getAdminUser(userId: string) {
   return request<AdminUserDetail>(`/v1/manager/admin/users/${encodeURIComponent(userId)}`, { cache: 'no-store' });
+}
+
+export function getAdminUserQuota(userId: string) {
+  return request<MonthlyQuota>(`/v1/manager/admin/quotas/users/${encodeURIComponent(userId)}`, { cache: 'no-store' });
+}
+
+export function updateAdminUserQuota(userId: string, update: MonthlyQuotaUpdate) {
+  return request<MonthlyQuota>(`/v1/manager/admin/quotas/users/${encodeURIComponent(userId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(update),
+  });
+}
+
+export function getAdminAgentQuota(agentId: string) {
+  return request<MonthlyQuota>(`/v1/manager/admin/quotas/agents/${encodeURIComponent(agentId)}`, { cache: 'no-store' });
+}
+
+export function updateAdminAgentQuota(agentId: string, update: MonthlyQuotaUpdate) {
+  return request<MonthlyQuota>(`/v1/manager/admin/quotas/agents/${encodeURIComponent(agentId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(update),
+  });
 }
 
 export function promoteAdminUser(userId: string) {

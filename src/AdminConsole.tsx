@@ -43,6 +43,7 @@ import {
   listAdminUsers,
   promoteAdminUser,
   revokeAdminParentKey,
+  transferAdminAgent,
   updateAdminAgentQuota,
   updateModelRestrictions,
   updateAdminUserQuota,
@@ -114,6 +115,10 @@ function displayKeyHint(parentKey?: AdminParentKey | null) {
 
 function displayName(user: AdminUser) {
   return [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username || user.email || user.external_user_id || user.id;
+}
+
+function userSearchText(user: AdminUser) {
+  return [displayName(user), user.email, user.username, user.external_user_id, user.id].filter(Boolean).join(' ').toLowerCase();
 }
 
 function formatNumber(value?: number | null) {
@@ -576,30 +581,85 @@ function QuotaEditor({
   );
 }
 
-function QuotasModal({
+function AgentControlsModal({
   user,
+  users,
   agents,
   unattributedUsage,
   onClose,
+  onTransferred,
 }: {
   user: AdminUser;
+  users: AdminUser[];
   agents: AdminAgent[];
   unattributedUsage?: UsageMetrics;
   onClose: () => void;
+  onTransferred: () => Promise<void>;
 }) {
   const name = displayName(user);
   const showUnattributedUsage = (unattributedUsage?.request_count || 0) > 0;
+  const [transferAgent, setTransferAgent] = useState<AdminAgent | null>(null);
+  const [destinationQuery, setDestinationQuery] = useState('');
+  const [destinationUserId, setDestinationUserId] = useState('');
+  const [reason, setReason] = useState('');
+  const [transferring, setTransferring] = useState(false);
+  const [transferError, setTransferError] = useState('');
+  const [transferSuccess, setTransferSuccess] = useState('');
+  const normalizedQuery = destinationQuery.trim().toLowerCase();
+  const destinationOptions = users
+    .filter((candidate) => candidate.id !== user.id)
+    .filter((candidate) => !normalizedQuery || userSearchText(candidate).includes(normalizedQuery))
+    .slice(0, 8);
+  const destinationUser = users.find((candidate) => candidate.id === destinationUserId) || null;
+
+  function beginTransfer(agent: AdminAgent) {
+    setTransferAgent(agent);
+    setDestinationQuery('');
+    setDestinationUserId('');
+    setReason('');
+    setTransferError('');
+    setTransferSuccess('');
+  }
+
+  async function submitTransfer() {
+    if (!transferAgent || !destinationUser) {
+      setTransferError('Select a destination user.');
+      return;
+    }
+    setTransferring(true);
+    setTransferError('');
+    setTransferSuccess('');
+    try {
+      await transferAdminAgent(transferAgent.id, destinationUser.id, reason);
+      await onTransferred();
+      setTransferSuccess(`${transferAgent.name || transferAgent.id} transferred to ${displayName(destinationUser)}.`);
+      setTransferAgent(null);
+      setDestinationUserId('');
+      setReason('');
+    } catch (err) {
+      setTransferError(
+        err instanceof ApiError && err.status === 403
+          ? 'Admin access is required to transfer agents. Refresh and try again.'
+          : err instanceof Error
+            ? err.message
+            : 'Agent transfer failed.',
+      );
+    } finally {
+      setTransferring(false);
+    }
+  }
 
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()} size="lg" aria-labelledby="admin-quotas-title">
+    <Modal open onOpenChange={(open) => !open && onClose()} size="lg" aria-labelledby="admin-agents-title">
       <ModalHeader>
         <div>
-          <p className="eyebrow">Monthly token quotas</p>
-          <ModalTitle id="admin-quotas-title">{name}'s quotas</ModalTitle>
+          <p className="eyebrow">Agent controls</p>
+          <ModalTitle id="admin-agents-title">{name}'s agents</ModalTitle>
         </div>
       </ModalHeader>
       <ModalBody>
         <div className="admin-quotas-modal">
+          {transferSuccess && <p className="quota-saved-copy">{transferSuccess}</p>}
           <section className="admin-quota-modal-section">
             <div className="admin-quota-modal-section-head">
               <div>
@@ -632,11 +692,112 @@ function QuotasModal({
                         <strong>{agent.name || agent.id}</strong>
                         <span>{agent.model || 'No model recorded'}</span>
                       </div>
-                      <div className="admin-agent-control-usage">
-                        <span>{formatTokens(agent.metrics?.total_tokens, agent.metrics?.request_count)}</span>
-                        <span>{formatRequests(agent.metrics?.request_count)}</span>
+                      <div className="admin-agent-control-actions">
+                        <div className="admin-agent-control-usage">
+                          <span>{formatTokens(agent.metrics?.total_tokens, agent.metrics?.request_count)}</span>
+                          <span>{formatRequests(agent.metrics?.request_count)}</span>
+                        </div>
+                        <Button variant="secondary" size="sm" type="button" disabled={transferring} onClick={() => beginTransfer(agent)}>
+                          Transfer
+                        </Button>
                       </div>
                     </div>
+                    {transferAgent?.id === agent.id && (
+                      <section className="admin-transfer-panel" aria-label={`Transfer ${transferAgent.name || transferAgent.id}`}>
+                        <div className="admin-quota-modal-section-head">
+                          <div>
+                            <h4>Transfer ownership</h4>
+                            <p className="admin-muted">Move manager access to another user. The existing agent key keeps working.</p>
+                          </div>
+                          <Button variant="ghost" size="sm" type="button" disabled={transferring} onClick={() => setTransferAgent(null)}>
+                            Cancel
+                          </Button>
+                        </div>
+
+                        <div className="admin-transfer-summary">
+                          <div>
+                            <span>Agent</span>
+                            <strong>{transferAgent.name || transferAgent.id}</strong>
+                          </div>
+                          <div>
+                            <span>Current owner</span>
+                            <strong>{name}</strong>
+                          </div>
+                          <div>
+                            <span>Destination owner</span>
+                            <strong>{destinationUser ? displayName(destinationUser) : 'Select a user'}</strong>
+                          </div>
+                        </div>
+
+                        <label className="admin-transfer-field">
+                          <span>Search destination users</span>
+                          <input
+                            type="search"
+                            value={destinationQuery}
+                            onChange={(event) => setDestinationQuery(event.target.value)}
+                            placeholder="Search by name, email, username, or id"
+                            disabled={transferring}
+                          />
+                        </label>
+
+                        <div className="admin-destination-list" role="listbox" aria-label="Destination users">
+                          {destinationOptions.length ? (
+                            destinationOptions.map((candidate) => {
+                              const selected = candidate.id === destinationUserId;
+                              const hasKey = !!candidate.current_parent_key || (candidate.active_parent_key_count || 0) > 0;
+                              return (
+                                <button
+                                  className={`admin-destination-option${selected ? ' selected' : ''}`}
+                                  key={candidate.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setDestinationUserId(candidate.id);
+                                    setTransferError('');
+                                  }}
+                                  disabled={transferring}
+                                  role="option"
+                                  aria-selected={selected}
+                                >
+                                  <span>
+                                    <strong>{displayName(candidate)}</strong>
+                                    <small>{candidate.email || candidate.username || candidate.id}</small>
+                                  </span>
+                                  <Badge variant={hasKey ? 'outline' : 'danger'} size="sm">
+                                    {hasKey ? 'Key ready' : 'No active key'}
+                                  </Badge>
+                                </button>
+                              );
+                            })
+                          ) : (
+                            <p className="admin-muted">No users match that search.</p>
+                          )}
+                        </div>
+
+                        <label className="admin-transfer-field">
+                          <span>Reason</span>
+                          <textarea
+                            value={reason}
+                            onChange={(event) => setReason(event.target.value)}
+                            placeholder="Optional admin note for audit history"
+                            disabled={transferring}
+                            rows={3}
+                          />
+                        </label>
+
+                        <p className="admin-transfer-warning">
+                          {name} will lose manager access to this agent. {destinationUser ? displayName(destinationUser) : 'The destination owner'} will
+                          gain access. Existing agnt_key credentials remain unchanged and keep working.
+                        </p>
+
+                        {transferError && <p className="dialog-copy danger-copy">{transferError}</p>}
+
+                        <div className="quota-actions">
+                          <Button variant="danger" type="button" disabled={transferring || !destinationUser} onClick={submitTransfer}>
+                            {transferring ? 'Transferring...' : 'Transfer ownership'}
+                          </Button>
+                        </div>
+                      </section>
+                    )}
                     <QuotaEditor scope="agent" scopeId={agent.id} title="Agent monthly token quota" />
                   </section>
                 ))}
@@ -937,14 +1098,18 @@ function Inspector({
   detail,
   loading,
   allModels,
+  users,
   onClose,
   onConfirm,
+  onRefreshUser,
 }: {
   detail: AdminUserDetail | null;
   loading: boolean;
   allModels: ModelListItem[];
+  users: AdminUser[];
   onClose: () => void;
   onConfirm: (action: ConfirmAction) => void;
+  onRefreshUser: (userId: string) => Promise<void>;
 }) {
   const [quotasOpen, setQuotasOpen] = useState(false);
 
@@ -988,7 +1153,7 @@ function Inspector({
                 </p>
               </div>
               <Button variant="secondary" size="sm" type="button" onClick={() => setQuotasOpen(true)}>
-                Manage quotas
+                Manage agents
               </Button>
             </div>
 
@@ -1048,7 +1213,14 @@ function Inspector({
           <ModelRestrictionsEditor parentKey={currentKey} allModels={allModels} />
 
           {quotasOpen && (
-            <QuotasModal user={user} agents={agents} unattributedUsage={unattributedUsage} onClose={() => setQuotasOpen(false)} />
+            <AgentControlsModal
+              user={user}
+              users={users}
+              agents={agents}
+              unattributedUsage={unattributedUsage}
+              onClose={() => setQuotasOpen(false)}
+              onTransferred={() => onRefreshUser(user.id)}
+            />
           )}
         </>
       )}
@@ -1138,6 +1310,21 @@ export function AdminConsole() {
     }
   }
 
+  async function refreshSelectedUser(userId: string) {
+    const [nextSummary, nextUsers, nextModels] = await Promise.all([getAdminSummary(), listAdminUsers(), listModels()]);
+    setSummary(nextSummary);
+    setUsers(nextUsers);
+    setModels(nextModels);
+    const selected = nextUsers.find((user) => user.id === userId);
+    if (selected) {
+      setSelectedUserId(selected.id);
+      setSelectedDetail(await getAdminUser(selected.id));
+    } else {
+      setSelectedUserId('');
+      setSelectedDetail(null);
+    }
+  }
+
   useEffect(() => {
     void loadAdmin();
   }, []);
@@ -1214,11 +1401,13 @@ export function AdminConsole() {
             detail={selectedDetail}
             loading={detailLoading}
             allModels={models}
+            users={users}
             onClose={() => {
               setSelectedUserId('');
               setSelectedDetail(null);
             }}
             onConfirm={setConfirmAction}
+            onRefreshUser={refreshSelectedUser}
           />
         </div>
       </CardContent>

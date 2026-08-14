@@ -198,6 +198,15 @@ export type MonthlyQuotaUpdate = {
   status: MonthlyQuotaStatus;
 };
 
+export type AdminAgentTransferResponse = {
+  agent_id: string;
+  source_user_id?: string | null;
+  source_parent_key_id?: string | null;
+  destination_user_id: string;
+  destination_parent_key_id: string;
+  transferred_at: string;
+};
+
 export class ApiError extends Error {
   status: number;
   code?: string;
@@ -229,6 +238,10 @@ function errorMessage(payload: unknown, fallback: string) {
   if (payload && typeof payload === 'object' && 'error' in payload) {
     const error = (payload as { error?: { code?: string; message?: string } }).error;
     if (error?.code === 'quota_exceeded') return 'Monthly token quota exceeded.';
+    if (error?.code === 'destination_user_not_found') return 'Destination user no longer exists.';
+    if (error?.code === 'destination_parent_key_not_found') return 'Destination user has no active Ozwell key.';
+    if (error?.code === 'agent_already_owned_by_destination') return 'Agent is already owned by that user.';
+    if (error?.code === 'agent_not_found') return 'Agent is missing or inaccessible.';
     if (error?.message) return error.message;
   }
   return fallback;
@@ -394,6 +407,17 @@ export function updateAdminAgentQuota(agentId: string, update: MonthlyQuotaUpdat
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(update),
+  });
+}
+
+export function transferAdminAgent(agentId: string, destinationUserId: string, reason = '') {
+  return request<AdminAgentTransferResponse>(`/v1/manager/admin/agents/${encodeURIComponent(agentId)}/transfer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      destination_user_id: destinationUserId,
+      ...(reason.trim() ? { reason: reason.trim() } : {}),
+    }),
   });
 }
 

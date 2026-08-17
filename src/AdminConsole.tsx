@@ -833,6 +833,25 @@ function AgentControlsModal({
 // can never drift apart visually or behaviourally.
 type RestrictionScope = 'key' | 'server';
 
+function restrictionSummary(scope: RestrictionScope, restricted: boolean, selectedCount: number) {
+  if (scope !== 'server') {
+    return restricted ? 'Only selected models are available for this Ozwell key.' : 'All enabled models allowed.';
+  }
+  if (!restricted) return 'Every discovered model is available to all users and agents.';
+  return selectedCount === 1
+    ? 'Only this 1 selection is available anywhere on this server.'
+    : `Only these ${selectedCount} selections are available anywhere on this server.`;
+}
+
+function saveSuccessMessage(scope: RestrictionScope, selectedCount: number) {
+  if (scope !== 'server') {
+    return selectedCount ? 'Model restrictions updated.' : 'Model restrictions reset.';
+  }
+  return selectedCount
+    ? 'Server model access updated. It applies to every user and agent immediately.'
+    : 'Server model access cleared. Every discovered model is available again.';
+}
+
 function ModelRestrictionsEditor({
   parentKey,
   allModels,
@@ -879,19 +898,26 @@ function ModelRestrictionsEditor({
   }, [filterQuery, groupedModels]);
   const filteredProviderNames = useMemo(() => Object.keys(filteredGrouped).sort(), [filteredGrouped]);
 
+  function applyRestrictions(allowed?: ModelRef[], effective?: ModelListItem[]) {
+    setAllowedKeys(new Set((allowed || []).map(selectionKey)));
+    setUnrestricted((allowed || []).length === 0);
+    setEffectiveModels(effective || []);
+  }
+
   async function loadRestrictions() {
     if (!ready) return;
     setLoading(true);
     setError('');
     setSuccess('');
     try {
-      const restrictions = isServer
-        ? await getServerModelRestrictions()
-        : await getModelRestrictions(parentKey!.id);
-      setAllowedKeys(new Set((restrictions.allowed_models || []).map(selectionKey)));
-      setUnrestricted((restrictions.allowed_models || []).length === 0);
-      setEffectiveModels(restrictions.effective_models || []);
-      if (isServer) setDiscoveredModels((restrictions as { discovered_models?: ModelListItem[] }).discovered_models || []);
+      if (isServer) {
+        const restrictions = await getServerModelRestrictions();
+        applyRestrictions(restrictions.allowed_models, restrictions.effective_models);
+        setDiscoveredModels(restrictions.discovered_models || []);
+      } else if (parentKey) {
+        const restrictions = await getModelRestrictions(parentKey.id);
+        applyRestrictions(restrictions.allowed_models, restrictions.effective_models);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load model restrictions.');
     } finally {
@@ -972,22 +998,15 @@ function ModelRestrictionsEditor({
               .map((model) => ({ provider, model: modelName(model) }));
           })
         : [];
-      const saved = isServer
-        ? await updateServerModelRestrictions(allowedModels)
-        : await updateModelRestrictions(parentKey!.id, allowedModels);
-      if (isServer) setDiscoveredModels((saved as { discovered_models?: ModelListItem[] }).discovered_models || discoveredModels);
-      setAllowedKeys(new Set((saved.allowed_models || []).map(selectionKey)));
-      setUnrestricted((saved.allowed_models || []).length === 0);
-      setEffectiveModels(saved.effective_models || []);
-      setSuccess(
-        isServer
-          ? nextKeys.size
-            ? 'Server model access updated. It applies to every user and agent immediately.'
-            : 'Server model access cleared. Every discovered model is available again.'
-          : nextKeys.size
-            ? 'Model restrictions updated.'
-            : 'Model restrictions reset.',
-      );
+      if (isServer) {
+        const saved = await updateServerModelRestrictions(allowedModels);
+        applyRestrictions(saved.allowed_models, saved.effective_models);
+        setDiscoveredModels(saved.discovered_models || discoveredModels);
+      } else if (parentKey) {
+        const saved = await updateModelRestrictions(parentKey.id, allowedModels);
+        applyRestrictions(saved.allowed_models, saved.effective_models);
+      }
+      setSuccess(saveSuccessMessage(scope, nextKeys.size));
       window.dispatchEvent(new Event('ozwell:notifications-refresh'));
       // A server change narrows every other model list in the console, so refresh them.
       onSaved?.();
@@ -1011,13 +1030,7 @@ function ModelRestrictionsEditor({
         <div>
           <h4>{isServer ? 'Server model access' : 'Model restrictions'}</h4>
           <p className="admin-muted">
-            {isServer
-              ? restrictionsEnabled
-                ? `Only these ${allowedKeys.size} selections are available anywhere on this server.`
-                : 'Every discovered model is available to all users and agents.'
-              : restrictionsEnabled
-                ? 'Only selected models are available for this Ozwell key.'
-                : 'All enabled models allowed.'}
+            {restrictionSummary(scope, restrictionsEnabled, allowedKeys.size)}
           </p>
         </div>
         <div className="model-restrictions-actions">

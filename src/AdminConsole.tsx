@@ -915,6 +915,10 @@ function ModelRestrictionsEditor({
     return selectedKeys.has(providerWideKey(modelProvider(model))) || selectedKeys.has(modelKey(model));
   }
 
+  // For the server scope this must reflect the current ticks, not the last save, because the label
+  // promises what happens after saving. The per-key scope keeps showing what the API returned.
+  const previewModels = isServer ? sourceModels.filter(modelSelected) : effectiveModels;
+
   function setProvider(provider: string, enabled: boolean) {
     const next = new Set(selectedKeys);
     for (const model of groupedModels[provider] || []) {
@@ -1036,7 +1040,7 @@ function ModelRestrictionsEditor({
           </li>
           <li className="model-cascade-step is-current">
             <span className="model-cascade-label">Server-wide</span>
-            <span className="model-cascade-value">{restrictionsEnabled ? effectiveModels.length : sourceModels.length}</span>
+            <span className="model-cascade-value">{restrictionsEnabled ? previewModels.length : sourceModels.length}</span>
           </li>
           <li className="model-cascade-step is-downstream">
             <span className="model-cascade-label">Per user</span>
@@ -1150,15 +1154,15 @@ function ModelRestrictionsEditor({
 
           <div className="effective-models">
             <span>{isServer ? 'Available after saving' : 'Effective models'}</span>
-            {effectiveModels.length ? (
-              <div className="model-chip-list" aria-label={`${effectiveModels.length} effective models`}>
-                <strong>{effectiveModels.length}</strong>
-                {effectiveModels.slice(0, 8).map((model) => (
+            {previewModels.length ? (
+              <div className="model-chip-list" aria-label={`${previewModels.length} effective models`}>
+                <strong>{previewModels.length}</strong>
+                {previewModels.slice(0, 8).map((model) => (
                   <span className="model-chip" key={modelKey(model)}>
                     {modelLabel(model)}
                   </span>
                 ))}
-                {effectiveModels.length > 8 && <span className="model-chip">+{effectiveModels.length - 8} more</span>}
+                {previewModels.length > 8 && <span className="model-chip">+{previewModels.length - 8} more</span>}
               </div>
             ) : (
               <strong>None returned</strong>

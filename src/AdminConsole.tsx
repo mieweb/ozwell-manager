@@ -39,6 +39,7 @@ import {
   getAdminUser,
   getAdminUserQuota,
   getModelRestrictions,
+  getServerModelRestrictions,
   listModels,
   listAdminUsers,
   promoteAdminUser,
@@ -46,6 +47,7 @@ import {
   transferAdminAgent,
   updateAdminAgentQuota,
   updateModelRestrictions,
+  updateServerModelRestrictions,
   updateAdminUserQuota,
 } from './api';
 
@@ -826,13 +828,23 @@ function AgentControlsModal({
   );
 }
 
+// One picker, two scopes. 'key' restricts a single user's Ozwell key; 'server' restricts the whole
+// server and sits outside the selected-user panel. Keeping a single component means the two controls
+// can never drift apart visually or behaviourally.
+type RestrictionScope = 'key' | 'server';
+
 function ModelRestrictionsEditor({
   parentKey,
   allModels,
+  scope = 'key',
+  onSaved,
 }: {
   parentKey: AdminParentKey | null;
   allModels: ModelListItem[];
+  scope?: RestrictionScope;
+  onSaved?: () => void;
 }) {
+  const isServer = scope === 'server';
   const [filterQuery, setFilterQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -841,14 +853,20 @@ function ModelRestrictionsEditor({
   const [allowedKeys, setAllowedKeys] = useState<Set<string>>(new Set());
   const [unrestricted, setUnrestricted] = useState(true);
   const [effectiveModels, setEffectiveModels] = useState<ModelListItem[]>([]);
+  const [discoveredModels, setDiscoveredModels] = useState<ModelListItem[]>([]);
 
-  const groupedModels = useMemo(() => groupModelsByProvider(allModels), [allModels]);
+  // The server policy narrows listModels(), so the server picker must offer the unfiltered
+  // discovered list or an excluded model could never be re-enabled.
+  const sourceModels = isServer ? discoveredModels : allModels;
+  const ready = isServer || Boolean(parentKey);
+
+  const groupedModels = useMemo(() => groupModelsByProvider(sourceModels), [sourceModels]);
   const providerNames = useMemo(() => Object.keys(groupedModels).sort(), [groupedModels]);
   const restrictionsEnabled = !unrestricted;
   const selectedKeys = useMemo(() => {
     if (!unrestricted) return allowedKeys;
-    return new Set(enabledModels(allModels).map(modelKey));
-  }, [allowedKeys, allModels, unrestricted]);
+    return new Set(enabledModels(sourceModels).map(modelKey));
+  }, [allowedKeys, sourceModels, unrestricted]);
   const filteredGrouped = useMemo(() => {
     if (!filterQuery.trim()) return groupedModels;
     const query = filterQuery.toLowerCase();
@@ -862,15 +880,18 @@ function ModelRestrictionsEditor({
   const filteredProviderNames = useMemo(() => Object.keys(filteredGrouped).sort(), [filteredGrouped]);
 
   async function loadRestrictions() {
-    if (!parentKey) return;
+    if (!ready) return;
     setLoading(true);
     setError('');
     setSuccess('');
     try {
-      const restrictions = await getModelRestrictions(parentKey.id);
+      const restrictions = isServer
+        ? await getServerModelRestrictions()
+        : await getModelRestrictions(parentKey!.id);
       setAllowedKeys(new Set((restrictions.allowed_models || []).map(selectionKey)));
       setUnrestricted((restrictions.allowed_models || []).length === 0);
       setEffectiveModels(restrictions.effective_models || []);
+      if (isServer) setDiscoveredModels((restrictions as { discovered_models?: ModelListItem[] }).discovered_models || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load model restrictions.');
     } finally {
@@ -883,7 +904,7 @@ function ModelRestrictionsEditor({
     setUnrestricted(true);
     setEffectiveModels([]);
     void loadRestrictions();
-  }, [parentKey?.id]);
+  }, [scope, parentKey?.id]);
 
   function providerSelected(provider: string) {
     const models = groupedModels[provider] || [];
@@ -913,7 +934,10 @@ function ModelRestrictionsEditor({
     for (const item of providerModels) {
       const key = modelKey(item);
       if (key === modelKey(model)) {
+        // next is seeded from selectedKeys, so unchecking has to delete — skipping the add leaves
+        // the model selected and the checkbox never turns off.
         if (enabled) next.add(key);
+        else next.delete(key);
       } else if (modelSelected(item)) {
         next.add(key);
       }
@@ -925,16 +949,16 @@ function ModelRestrictionsEditor({
   function enableRestrictions() {
     if (!unrestricted) return;
     setUnrestricted(false);
-    setAllowedKeys(new Set(enabledModels(allModels).map(modelKey)));
+    setAllowedKeys(new Set(enabledModels(sourceModels).map(modelKey)));
   }
 
   async function saveRestrictions(nextKeys = allowedKeys) {
-    if (!parentKey) return;
+    if (!ready) return;
     setSaving(true);
     setError('');
     setSuccess('');
     try {
-      const enabled = enabledModels(allModels);
+      const enabled = enabledModels(sourceModels);
       const providers = Array.from(new Set(enabled.map(modelProvider))).sort();
       const allowedModels = nextKeys.size
         ? providers.flatMap((provider) => {
@@ -944,12 +968,25 @@ function ModelRestrictionsEditor({
               .map((model) => ({ provider, model: modelName(model) }));
           })
         : [];
-      const saved = await updateModelRestrictions(parentKey.id, allowedModels);
+      const saved = isServer
+        ? await updateServerModelRestrictions(allowedModels)
+        : await updateModelRestrictions(parentKey!.id, allowedModels);
+      if (isServer) setDiscoveredModels((saved as { discovered_models?: ModelListItem[] }).discovered_models || discoveredModels);
       setAllowedKeys(new Set((saved.allowed_models || []).map(selectionKey)));
       setUnrestricted((saved.allowed_models || []).length === 0);
       setEffectiveModels(saved.effective_models || []);
-      setSuccess(nextKeys.size ? 'Model restrictions updated.' : 'Model restrictions reset.');
+      setSuccess(
+        isServer
+          ? nextKeys.size
+            ? 'Server model access updated. It applies to every user and agent immediately.'
+            : 'Server model access cleared. Every discovered model is available again.'
+          : nextKeys.size
+            ? 'Model restrictions updated.'
+            : 'Model restrictions reset.',
+      );
       window.dispatchEvent(new Event('ozwell:notifications-refresh'));
+      // A server change narrows every other model list in the console, so refresh them.
+      onSaved?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to save model restrictions.');
     } finally {
@@ -968,27 +1005,56 @@ function ModelRestrictionsEditor({
     <div className="admin-inspector-section model-restrictions">
       <div className="model-restrictions-head">
         <div>
-          <h4>Model restrictions</h4>
+          <h4>{isServer ? 'Server model access' : 'Model restrictions'}</h4>
           <p className="admin-muted">
-            {restrictionsEnabled ? 'Only selected models are available for this Ozwell key.' : 'All enabled models allowed.'}
+            {isServer
+              ? restrictionsEnabled
+                ? `Only these ${allowedKeys.size} selections are available anywhere on this server.`
+                : 'Every discovered model is available to all users and agents.'
+              : restrictionsEnabled
+                ? 'Only selected models are available for this Ozwell key.'
+                : 'All enabled models allowed.'}
           </p>
         </div>
         <div className="model-restrictions-actions">
-          <Button variant="secondary" size="sm" type="button" disabled={!parentKey || loading || saving} onClick={() => saveRestrictions()}>
+          <Button variant={isServer ? 'primary' : 'secondary'} size="sm" type="button" disabled={!ready || loading || saving} onClick={() => saveRestrictions()}>
             {saving ? 'Saving...' : 'Save'}
           </Button>
-          <Button variant="secondary" size="sm" type="button" disabled={!parentKey || loading || saving} onClick={resetRestrictions}>
-            Reset model restrictions
+          <Button variant="secondary" size="sm" type="button" disabled={!ready || loading || saving} onClick={resetRestrictions}>
+            {isServer ? 'Allow all models' : 'Reset model restrictions'}
           </Button>
         </div>
       </div>
 
-      {!parentKey && <p className="admin-muted">No active Ozwell key.</p>}
-      {parentKey && loading && <SpinnerWithLabel label="Loading model restrictions" />}
+      {/* The cascade is the substance of this feature, so it is shown as structure rather than prose.
+          Each step is a real filter; the counts are live. */}
+      {isServer && (
+        <ol className="model-cascade" aria-label="How model access is narrowed">
+          <li className="model-cascade-step">
+            <span className="model-cascade-label">Discovered</span>
+            <span className="model-cascade-value">{sourceModels.length}</span>
+          </li>
+          <li className="model-cascade-step is-current">
+            <span className="model-cascade-label">Server-wide</span>
+            <span className="model-cascade-value">{restrictionsEnabled ? effectiveModels.length : sourceModels.length}</span>
+          </li>
+          <li className="model-cascade-step is-downstream">
+            <span className="model-cascade-label">Per user</span>
+            <span className="model-cascade-value">set per key</span>
+          </li>
+          <li className="model-cascade-step is-downstream">
+            <span className="model-cascade-label">Per agent</span>
+            <span className="model-cascade-value">set per agent</span>
+          </li>
+        </ol>
+      )}
+
+      {!ready && <p className="admin-muted">No active Ozwell key.</p>}
+      {ready && loading && <SpinnerWithLabel label={isServer ? 'Loading server model access' : 'Loading model restrictions'} />}
       {error && <p className="dialog-copy danger-copy">{error}</p>}
       {success && <p className="dialog-copy success-copy">{success}</p>}
 
-      {parentKey && providerNames.length > 0 && (
+      {ready && providerNames.length > 0 && (
         <>
           <div className="agent-model-mode-toggle">
             <button
@@ -1000,7 +1066,7 @@ function ModelRestrictionsEditor({
               }}
               disabled={loading || saving}
             >
-              Any model
+              {isServer ? 'Any discovered model' : 'Any model'}
             </button>
             <button
               type="button"
@@ -1026,7 +1092,11 @@ function ModelRestrictionsEditor({
 
           <div className="model-restrictions-groups">
             {unrestricted ? (
-              <p className="admin-muted">All enabled models are allowed for this Ozwell key.</p>
+              <p className="admin-muted">
+                {isServer
+                  ? `All ${sourceModels.length} discovered models are available server-wide.`
+                  : 'All enabled models are allowed for this Ozwell key.'}
+              </p>
             ) : filteredProviderNames.length ? (
               filteredProviderNames.map((provider) => {
                 const providerList = filteredGrouped[provider] || [];
@@ -1071,8 +1141,15 @@ function ModelRestrictionsEditor({
             )}
           </div>
 
+          {isServer && restrictionsEnabled && allowedKeys.size === 0 && (
+            <p className="dialog-copy danger-copy">
+              Nothing is selected. Saving now blocks every model for every user — pick at least one, or choose
+              “Any discovered model”.
+            </p>
+          )}
+
           <div className="effective-models">
-            <span>Effective models</span>
+            <span>{isServer ? 'Available after saving' : 'Effective models'}</span>
             {effectiveModels.length ? (
               <div className="model-chip-list" aria-label={`${effectiveModels.length} effective models`}>
                 <strong>{effectiveModels.length}</strong>
@@ -1089,7 +1166,7 @@ function ModelRestrictionsEditor({
           </div>
         </>
       )}
-      {parentKey && !loading && providerNames.length === 0 && <p className="admin-muted">No discovered models returned.</p>}
+      {ready && !loading && providerNames.length === 0 && <p className="admin-muted">No discovered models returned.</p>}
     </div>
   );
 }
@@ -1385,6 +1462,20 @@ export function AdminConsole() {
 
       <CardContent className="admin-content">
         <SummaryMetrics summary={summary} />
+
+        {/* Server-wide, so it sits outside the workspace grid and is never tied to a selected user. */}
+        <section className="admin-section admin-server-models">
+          <div className="admin-section-head">
+            <div>
+              <p className="eyebrow">Server-wide</p>
+              <h3>Model access</h3>
+            </div>
+            <Badge variant="warning" size="sm">
+              Affects every user
+            </Badge>
+          </div>
+          <ModelRestrictionsEditor scope="server" parentKey={null} allModels={models} onSaved={loadAdmin} />
+        </section>
 
         <div className={selectedDetail ? 'admin-workspace' : 'admin-workspace table-only'}>
           <section className="admin-section">

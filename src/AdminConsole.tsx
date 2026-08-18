@@ -863,11 +863,14 @@ function ModelRestrictionsEditor({
   allModels,
   scope = 'key',
   onSaved,
+  onCancel,
 }: {
   parentKey: AdminParentKey | null;
   allModels: ModelListItem[];
   scope?: RestrictionScope;
   onSaved?: () => void;
+  /** Given when the editor is in a dialog: the second button becomes Cancel and closes it. */
+  onCancel?: () => void;
 }) {
   const isServer = scope === 'server';
   const [filterQuery, setFilterQuery] = useState('');
@@ -1040,14 +1043,6 @@ function ModelRestrictionsEditor({
             {restrictionSummary(scope, restrictionsEnabled, previewModels.length, sourceModels.length)}
           </p>
         </div>
-        <div className="model-restrictions-actions">
-          <Button variant={isServer ? 'primary' : 'secondary'} size="sm" type="button" disabled={!ready || loading || saving} onClick={() => saveRestrictions()}>
-            {saving ? 'Saving...' : 'Save'}
-          </Button>
-          <Button variant="secondary" size="sm" type="button" disabled={!ready || loading || saving} onClick={isServer ? loadRestrictions : resetRestrictions}>
-            {isServer ? 'Cancel' : 'Reset'}
-          </Button>
-        </div>
       </div>
 
       {!ready && <p className="admin-muted">No active Ozwell key.</p>}
@@ -1057,8 +1052,8 @@ function ModelRestrictionsEditor({
 
       {ready && providerNames.length > 0 && (
         <>
-          {/* Two states of one policy, so they are radios. The old segmented control read as a view
-              switch, which is what made "what does this button do" the first question people asked. */}
+          {/* Two states of one policy, so radios rather than a segmented control, which reads as a
+              switch between views. */}
           <RadioGroup
             name={`model-access-${scope}`}
             value={unrestricted ? 'any' : 'selected'}
@@ -1194,6 +1189,29 @@ function ModelRestrictionsEditor({
         </>
       )}
       {ready && !loading && providerNames.length === 0 && <p className="admin-muted">No discovered models returned.</p>}
+
+      {/* Actions sit last, where a dialog puts them. Kept inside the editor because it owns the
+          saving state; lifting them into ModalFooter would mean exposing save() to the parent. */}
+      <div className="model-restrictions-actions">
+        <Button
+          variant={isServer ? 'primary' : 'secondary'}
+          size="sm"
+          type="button"
+          disabled={!ready || loading || saving}
+          onClick={() => saveRestrictions()}
+        >
+          {saving ? 'Saving...' : 'Save'}
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          type="button"
+          disabled={!ready || loading || saving}
+          onClick={onCancel ?? resetRestrictions}
+        >
+          {onCancel ? 'Cancel' : 'Reset'}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -1567,6 +1585,7 @@ export function AdminConsole() {
                 setModelAccessOpen(false);
                 void loadAdmin();
               }}
+              onCancel={() => setModelAccessOpen(false)}
             />
           </ModalBody>
         </Modal>

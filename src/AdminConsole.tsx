@@ -1156,8 +1156,8 @@ function ModelRestrictionsEditor({
               <Alert variant="warning">
                 <AlertTitle>Nothing is selected</AlertTitle>
                 <AlertDescription>
-                  Saving now would leave nobody able to use any model. Pick at least one, or choose “Approve every
-                  model”.
+                  An empty list means no restriction, so saving now would approve every model again. Pick at least one
+                  model to narrow the list.
                 </AlertDescription>
               </Alert>
             ) : (
@@ -1198,7 +1198,7 @@ function ModelRestrictionsEditor({
           variant={isServer ? 'primary' : 'secondary'}
           size="sm"
           type="button"
-          disabled={!ready || loading || saving}
+          disabled={!ready || loading || saving || (restrictionsEnabled && allowedKeys.size === 0)}
           onClick={() => saveRestrictions()}
         >
           {saving ? 'Saving...' : 'Save'}
@@ -1366,25 +1366,27 @@ export function AdminConsole() {
   const [modelAccessOpen, setModelAccessOpen] = useState(false);
   // Summary for the collapsed bar. listModels() is already narrowed by this policy, so the totals
   // have to come from the policy endpoint itself, which also returns the unfiltered registry.
-  const [serverModels, setServerModels] = useState<{ allowed: number; discovered: number } | null>(null);
+  const [serverModels, setServerModels] = useState<{ allowed: number; approved: number; discovered: number } | null>(null);
 
   async function loadAdmin() {
     setState('loading');
     setError('');
     try {
-      const [nextSummary, nextUsers, nextModels, nextServer] = await Promise.all([
-        getAdminSummary(),
-        listAdminUsers(),
-        listModels(),
-        getServerModelRestrictions(),
-      ]);
+      const [nextSummary, nextUsers, nextModels] = await Promise.all([getAdminSummary(), listAdminUsers(), listModels()]);
       setSummary(nextSummary);
       setUsers(nextUsers);
       setModels(nextModels);
-      setServerModels({
-        allowed: (nextServer.allowed_models || []).length,
-        discovered: (nextServer.discovered_models || []).length,
-      });
+      // Loaded on its own: this endpoint only exists once the matching API change is deployed, and a
+      // slow or missing one must not take the whole console down with it.
+      getServerModelRestrictions()
+        .then((nextServer) =>
+          setServerModels({
+            allowed: (nextServer.allowed_models || []).length,
+            approved: (nextServer.effective_models || []).length,
+            discovered: (nextServer.discovered_models || []).length,
+          }),
+        )
+        .catch(() => setServerModels(null));
       setState('ready');
       return nextUsers;
     } catch (err) {
@@ -1533,7 +1535,7 @@ export function AdminConsole() {
                 ? 'Everyone here can use these.'
                 : serverModels.allowed === 0
                   ? `Everyone here can use all ${serverModels.discovered} models.`
-                  : `Everyone here can use ${models.length} of ${serverModels.discovered} models.`}
+                  : `Everyone here can use ${serverModels.approved} of ${serverModels.discovered} models.`}
             </span>
           </div>
           <Button variant="secondary" size="sm" type="button" onClick={() => setModelAccessOpen(true)}>

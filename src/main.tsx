@@ -605,7 +605,7 @@ function ModelAccessControls({
       {!providerNames.length && <p className="agent-model-restriction-hint">No provider models are currently available.</p>}
 
       <div className="agent-model-restriction-section">
-        <span className="agent-model-controls-sublabel">Allowed models</span>
+        <span className="agent-model-controls-sublabel">Models this agent can pick</span>
         <div className="agent-model-mode-toggle">
           <button
             type="button"
@@ -627,7 +627,12 @@ function ModelAccessControls({
         </div>
 
         {!restricted && (
-          <p className="agent-model-restriction-hint">Agent can use any model allowed by the parent key.</p>
+          // Names the level above so it is clear this narrows what you already have, and only for
+          // this agent — not for you, and not for anyone else.
+          <p className="agent-model-restriction-hint">
+            This agent can use any of the {models.length} models available to you. Narrowing here only affects this
+            agent.
+          </p>
         )}
 
         {restricted && (

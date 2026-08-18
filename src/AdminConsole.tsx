@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
   Badge,
   Button,
   Card,
@@ -12,6 +15,8 @@ import {
   ModalFooter,
   ModalHeader,
   ModalTitle,
+  Radio,
+  RadioGroup,
   SpinnerWithLabel,
   Table,
   TableBody,
@@ -833,14 +838,15 @@ function AgentControlsModal({
 // can never drift apart visually or behaviourally.
 type RestrictionScope = 'key' | 'server';
 
-function restrictionSummary(scope: RestrictionScope, restricted: boolean, selectedCount: number) {
+function restrictionSummary(scope: RestrictionScope, restricted: boolean, approvedCount: number, totalCount: number) {
   if (scope !== 'server') {
-    return restricted ? 'Only selected models are available for this Ozwell key.' : 'All enabled models allowed.';
+    // Names the level above, so it is obvious this narrows the approved list rather than replacing it.
+    return restricted
+      ? `This user can use ${approvedCount} of the ${totalCount} approved models.`
+      : `This user can use all ${totalCount} approved models.`;
   }
-  if (!restricted) return 'Every discovered model is available to all users and agents.';
-  return selectedCount === 1
-    ? 'Only this 1 selection is available anywhere on this server.'
-    : `Only these ${selectedCount} selections are available anywhere on this server.`;
+  if (!restricted) return `Everyone here can use all ${totalCount} models.`;
+  return `Everyone here can use ${approvedCount} of ${totalCount} models.`;
 }
 
 function saveSuccessMessage(scope: RestrictionScope, selectedCount: number) {
@@ -848,8 +854,8 @@ function saveSuccessMessage(scope: RestrictionScope, selectedCount: number) {
     return selectedCount ? 'Model restrictions updated.' : 'Model restrictions reset.';
   }
   return selectedCount
-    ? 'Server model access updated. It applies to every user and agent immediately.'
-    : 'Server model access cleared. Every discovered model is available again.';
+    ? 'Approved models updated. Everyone sees the change straight away.'
+    : 'Every model is approved again. Everyone sees the change straight away.';
 }
 
 function ModelRestrictionsEditor({
@@ -1028,43 +1034,21 @@ function ModelRestrictionsEditor({
     <div className="admin-inspector-section model-restrictions">
       <div className="model-restrictions-head">
         <div>
-          <h4>{isServer ? 'Server model access' : 'Model restrictions'}</h4>
+          {/* The server scope lives in a dialog that already carries the title. */}
+          {!isServer && <h4>Models this user can pick</h4>}
           <p className="admin-muted">
-            {restrictionSummary(scope, restrictionsEnabled, allowedKeys.size)}
+            {restrictionSummary(scope, restrictionsEnabled, previewModels.length, sourceModels.length)}
           </p>
         </div>
         <div className="model-restrictions-actions">
           <Button variant={isServer ? 'primary' : 'secondary'} size="sm" type="button" disabled={!ready || loading || saving} onClick={() => saveRestrictions()}>
             {saving ? 'Saving...' : 'Save'}
           </Button>
-          <Button variant="secondary" size="sm" type="button" disabled={!ready || loading || saving} onClick={resetRestrictions}>
-            {isServer ? 'Allow all models' : 'Reset model restrictions'}
+          <Button variant="secondary" size="sm" type="button" disabled={!ready || loading || saving} onClick={isServer ? loadRestrictions : resetRestrictions}>
+            {isServer ? 'Cancel' : 'Reset'}
           </Button>
         </div>
       </div>
-
-      {/* The cascade is the substance of this feature, so it is shown as structure rather than prose.
-          Each step is a real filter; the counts are live. */}
-      {isServer && (
-        <ol className="model-cascade" aria-label="How model access is narrowed">
-          <li className="model-cascade-step">
-            <span className="model-cascade-label">Discovered</span>
-            <span className="model-cascade-value">{sourceModels.length}</span>
-          </li>
-          <li className="model-cascade-step is-current">
-            <span className="model-cascade-label">Server-wide</span>
-            <span className="model-cascade-value">{restrictionsEnabled ? previewModels.length : sourceModels.length}</span>
-          </li>
-          <li className="model-cascade-step is-downstream">
-            <span className="model-cascade-label">Per user</span>
-            <span className="model-cascade-value">set per key</span>
-          </li>
-          <li className="model-cascade-step is-downstream">
-            <span className="model-cascade-label">Per agent</span>
-            <span className="model-cascade-value">set per agent</span>
-          </li>
-        </ol>
-      )}
 
       {!ready && <p className="admin-muted">No active Ozwell key.</p>}
       {ready && loading && <SpinnerWithLabel label={isServer ? 'Loading server model access' : 'Loading model restrictions'} />}
@@ -1073,28 +1057,38 @@ function ModelRestrictionsEditor({
 
       {ready && providerNames.length > 0 && (
         <>
-          <div className="agent-model-mode-toggle">
-            <button
-              type="button"
-              className={`agent-model-mode-btn${unrestricted ? ' active' : ''}`}
-              onClick={() => {
+          {/* Two states of one policy, so they are radios. The old segmented control read as a view
+              switch, which is what made "what does this button do" the first question people asked. */}
+          <RadioGroup
+            name={`model-access-${scope}`}
+            value={unrestricted ? 'any' : 'selected'}
+            onValueChange={(value) => {
+              if (value === 'any') {
                 setUnrestricted(true);
                 setAllowedKeys(new Set());
-              }}
-              disabled={loading || saving}
-            >
-              {isServer ? 'Any discovered model' : 'Any model'}
-            </button>
-            <button
-              type="button"
-              className={`agent-model-mode-btn${!unrestricted ? ' active' : ''}`}
-              onClick={enableRestrictions}
-              disabled={loading || saving}
-            >
-              Specific models
-              {!unrestricted && <span className="agent-model-mode-count">{allowedKeys.size}</span>}
-            </button>
-          </div>
+              } else {
+                enableRestrictions();
+              }
+            }}
+            disabled={loading || saving}
+          >
+            <Radio
+              value="any"
+              label={isServer ? 'Approve every model' : 'Allow every approved model'}
+              description={
+                isServer ? 'Including any model added later.' : 'Including any model approved later.'
+              }
+            />
+            <Radio
+              value="selected"
+              label={isServer ? 'Approve only selected models' : 'Allow only selected models'}
+              description={
+                isServer
+                  ? 'Everything else disappears from model pickers for everyone.'
+                  : 'Everything else disappears from this user’s model pickers.'
+              }
+            />
+          </RadioGroup>
 
           {!unrestricted && (
             <input
@@ -1109,11 +1103,13 @@ function ModelRestrictionsEditor({
 
           <div className="model-restrictions-groups">
             {unrestricted ? (
-              <p className="admin-muted">
-                {isServer
-                  ? `All ${sourceModels.length} discovered models are available server-wide.`
-                  : 'All enabled models are allowed for this Ozwell key.'}
-              </p>
+              // The summary line above already says this for the server scope; repeating it here
+              // just gave the dialog two sentences saying the same thing.
+              isServer ? null : (
+                <p className="admin-muted">
+                  This user can pick from every approved model. Narrowing here only affects this user.
+                </p>
+              )
             ) : filteredProviderNames.length ? (
               filteredProviderNames.map((provider) => {
                 const providerList = filteredGrouped[provider] || [];
@@ -1158,29 +1154,43 @@ function ModelRestrictionsEditor({
             )}
           </div>
 
-          {isServer && restrictionsEnabled && allowedKeys.size === 0 && (
-            <p className="dialog-copy danger-copy">
-              Nothing is selected. Saving now blocks every model for every user — pick at least one, or choose
-              “Any discovered model”.
-            </p>
+          {/* Says what Save does, before it is pressed. The old panel never stated the consequence. */}
+          {isServer && restrictionsEnabled && (
+            allowedKeys.size === 0 ? (
+              <Alert variant="warning">
+                <AlertTitle>Nothing is selected</AlertTitle>
+                <AlertDescription>
+                  Saving now would leave nobody able to use any model. Pick at least one, or choose “Approve every
+                  model”.
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <Alert variant="info">
+                <AlertDescription>
+                  After saving, everyone here can use {previewModels.length} of {sourceModels.length} models.
+                </AlertDescription>
+              </Alert>
+            )
           )}
 
-          <div className="effective-models">
-            <span>{isServer ? 'Available after saving' : 'Effective models'}</span>
-            {previewModels.length ? (
-              <div className="model-chip-list" aria-label={`${previewModels.length} effective models`}>
-                <strong>{previewModels.length}</strong>
-                {previewModels.slice(0, 8).map((model) => (
-                  <span className="model-chip" key={modelKey(model)}>
-                    {modelLabel(model)}
-                  </span>
-                ))}
-                {previewModels.length > 8 && <span className="model-chip">+{previewModels.length - 8} more</span>}
-              </div>
-            ) : (
-              <strong>None returned</strong>
-            )}
-          </div>
+          {!isServer && (
+            <div className="effective-models">
+              <span>Effective models</span>
+              {previewModels.length ? (
+                <div className="model-chip-list" aria-label={`${previewModels.length} effective models`}>
+                  <strong>{previewModels.length}</strong>
+                  {previewModels.slice(0, 8).map((model) => (
+                    <span className="model-chip" key={modelKey(model)}>
+                      {modelLabel(model)}
+                    </span>
+                  ))}
+                  {previewModels.length > 8 && <span className="model-chip">+{previewModels.length - 8} more</span>}
+                </div>
+              ) : (
+                <strong>None returned</strong>
+              )}
+            </div>
+          )}
         </>
       )}
       {ready && !loading && providerNames.length === 0 && <p className="admin-muted">No discovered models returned.</p>}
@@ -1334,15 +1344,28 @@ export function AdminConsole() {
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [confirmError, setConfirmError] = useState('');
+  const [modelAccessOpen, setModelAccessOpen] = useState(false);
+  // Summary for the collapsed bar. listModels() is already narrowed by this policy, so the totals
+  // have to come from the policy endpoint itself, which also returns the unfiltered registry.
+  const [serverModels, setServerModels] = useState<{ allowed: number; discovered: number } | null>(null);
 
   async function loadAdmin() {
     setState('loading');
     setError('');
     try {
-      const [nextSummary, nextUsers, nextModels] = await Promise.all([getAdminSummary(), listAdminUsers(), listModels()]);
+      const [nextSummary, nextUsers, nextModels, nextServer] = await Promise.all([
+        getAdminSummary(),
+        listAdminUsers(),
+        listModels(),
+        getServerModelRestrictions(),
+      ]);
       setSummary(nextSummary);
       setUsers(nextUsers);
       setModels(nextModels);
+      setServerModels({
+        allowed: (nextServer.allowed_models || []).length,
+        discovered: (nextServer.discovered_models || []).length,
+      });
       setState('ready');
       return nextUsers;
     } catch (err) {
@@ -1481,18 +1504,23 @@ export function AdminConsole() {
         <SummaryMetrics summary={summary} />
 
         {/* Server-wide, so it sits outside the workspace grid and is never tied to a selected user. */}
-        <section className="admin-section admin-server-models">
-          <div className="admin-section-head">
-            <div>
-              <p className="eyebrow">Server-wide</p>
-              <h3>Model access</h3>
-            </div>
-            <Badge variant="warning" size="sm">
-              Affects every user
-            </Badge>
+        {/* One line in the console, the panel itself in a modal. It is a rarely-touched setting, so it
+            should not take a screenful above the table people actually came here for. */}
+        <div className="admin-server-models-bar">
+          <div>
+            <strong>Approved models</strong>
+            <span className="admin-muted">
+              {!serverModels
+                ? 'Everyone here can use these.'
+                : serverModels.allowed === 0
+                  ? `Everyone here can use all ${serverModels.discovered} models.`
+                  : `Everyone here can use ${models.length} of ${serverModels.discovered} models.`}
+            </span>
           </div>
-          <ModelRestrictionsEditor scope="server" parentKey={null} allModels={models} onSaved={loadAdmin} />
-        </section>
+          <Button variant="secondary" size="sm" type="button" onClick={() => setModelAccessOpen(true)}>
+            Change
+          </Button>
+        </div>
 
         <div className={selectedDetail ? 'admin-workspace' : 'admin-workspace table-only'}>
           <section className="admin-section">
@@ -1519,6 +1547,30 @@ export function AdminConsole() {
           />
         </div>
       </CardContent>
+
+      {modelAccessOpen && (
+        <Modal open onOpenChange={(open) => !open && setModelAccessOpen(false)} size="lg" aria-labelledby="server-model-access-title">
+          <ModalHeader>
+            <div>
+              <ModalTitle id="server-model-access-title">Approved models</ModalTitle>
+            </div>
+            <Badge variant="warning" size="sm">
+              Affects everyone
+            </Badge>
+          </ModalHeader>
+          <ModalBody className="model-access-modal">
+            <ModelRestrictionsEditor
+              scope="server"
+              parentKey={null}
+              allModels={models}
+              onSaved={() => {
+                setModelAccessOpen(false);
+                void loadAdmin();
+              }}
+            />
+          </ModalBody>
+        </Modal>
+      )}
 
       {confirmAction && (
         <ConfirmModal

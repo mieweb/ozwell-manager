@@ -1807,74 +1807,62 @@ body {
 
 /* Server-wide access sits outside the user workspace, so it needs its own surface rather than the
    divider rule that separates sections inside the inspector. */
-.admin-server-models .model-restrictions {
+/* Collapsed server-model row. One line in the console; the editor itself lives in a modal. */
+.admin-server-models-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   border: 1px solid var(--mieweb-border, #dce4ec);
   border-radius: 10px;
-  padding: 14px;
-}
-
-.model-restrictions-note {
-  margin: 0;
-}
-
-/* The narrowing cascade, shown as structure. Steps read left to right; the two downstream steps are
-   dimmed because they are owned elsewhere in the console, not editable here. */
-.model-cascade {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: stretch;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.model-cascade-step {
-  display: grid;
-  gap: 2px;
-  flex: 1 1 96px;
-  min-width: 0;
-  padding: 8px 10px;
-  border: 1px solid var(--mieweb-border, #dce4ec);
-  border-radius: 8px;
-  background: var(--mieweb-muted, #f4f7fa);
-}
-
-.model-cascade-step.is-current {
-  border-color: var(--mieweb-primary, #2f6bff);
+  padding: 12px 14px;
   background: var(--mieweb-card, #fff);
-  box-shadow: inset 0 0 0 1px var(--mieweb-primary, #2f6bff);
 }
 
-.model-cascade-step.is-downstream {
-  opacity: 0.62;
+.admin-server-models-bar > div {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
 }
 
-.model-cascade-label {
-  color: var(--mieweb-muted-foreground, #5b6b77);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+.admin-server-models-bar .eyebrow {
+  margin: 0;
+  flex-basis: 100%;
 }
 
-.model-cascade-value {
+.admin-server-models-bar strong {
   color: var(--mieweb-foreground, #172033);
   font-size: 15px;
   font-weight: 720;
-  font-variant-numeric: tabular-nums;
 }
 
-.model-cascade-step.is-downstream .model-cascade-value {
-  font-size: 12px;
-  font-weight: 600;
+.admin-server-models-bar .admin-muted {
+  font-size: 13px;
 }
 
+/* Inside the modal the editor is the whole dialog, so it needs no border of its own. */
+.model-access-modal .model-restrictions {
+  border-top: 0;
+  padding-top: 0;
+}
+
+
+
+/* Wraps to stacked rows in the narrow user inspector, where a fixed two-column split squeezed the
+   heading onto three lines. */
 .model-restrictions-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: start;
+  justify-content: space-between;
   gap: 10px;
+}
+
+.model-restrictions-head > div {
+  flex: 1 1 190px;
+  min-width: 0;
 }
 
 .model-restrictions-actions {

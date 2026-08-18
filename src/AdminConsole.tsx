@@ -10,6 +10,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  Checkbox,
   Modal,
   ModalBody,
   ModalFooter,
@@ -1120,25 +1121,25 @@ function ModelRestrictionsEditor({
                       </span>
                     </summary>
                     <div className="model-option-list">
-                      <label className="model-option model-provider-toggle-row">
-                        <input
-                          type="checkbox"
-                          checked={providerSelected(provider)}
-                          disabled={loading || saving}
-                          onChange={(event) => setProvider(provider, event.target.checked)}
-                        />
-                        <span>All {providerLabel(provider)} models</span>
-                      </label>
+                      {/* Indeterminate when only part of a provider is selected, so a half-picked
+                          group no longer looks identical to an untouched one. */}
+                      <Checkbox
+                        className="model-option model-provider-toggle-row"
+                        label={`All ${providerLabel(provider)} models`}
+                        checked={providerSelected(provider)}
+                        indeterminate={selectedCount > 0 && selectedCount < providerList.length}
+                        disabled={loading || saving}
+                        onChange={(event) => setProvider(provider, event.target.checked)}
+                      />
                       {providerList.map((model) => (
-                        <label className="model-option model-option-indent" key={modelKey(model)}>
-                          <input
-                            type="checkbox"
-                            checked={modelSelected(model)}
-                            disabled={loading || saving}
-                            onChange={(event) => setModel(model, event.target.checked)}
-                          />
-                          <span>{modelLabel(model)}</span>
-                        </label>
+                        <Checkbox
+                          key={modelKey(model)}
+                          className="model-option model-option-indent"
+                          label={modelLabel(model)}
+                          checked={modelSelected(model)}
+                          disabled={loading || saving}
+                          onChange={(event) => setModel(model, event.target.checked)}
+                        />
                       ))}
                     </div>
                   </details>

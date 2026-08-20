@@ -48,6 +48,16 @@ import {
   updateModelRestrictions,
   updateAdminUserQuota,
 } from './api';
+import {
+  enabledModels,
+  groupModelsByProvider,
+  modelKey,
+  modelName,
+  modelProvider,
+  providerLabel,
+  providerWideKey,
+  selectionKey,
+} from './models';
 
 type ConfirmAction = {
   title: string;
@@ -59,53 +69,11 @@ type ConfirmAction = {
 
 type AdminState = 'loading' | 'ready' | 'error' | 'access-denied';
 
-function modelProvider(model: ModelListItem | ModelRef) {
-  return model.provider || 'unknown';
-}
-
-function providerLabel(provider: string) {
-  const labels: Record<string, string> = {
-    anthropic: 'Anthropic',
-    ollama: 'Ollama',
-    openai: 'OpenAI',
-  };
-  return labels[provider.toLowerCase()] || provider;
-}
-
-function modelName(model: ModelListItem | ModelRef) {
-  return model.model || ('id' in model ? model.id : '');
-}
-
-function modelKey(model: ModelListItem | ModelRef) {
-  return `${modelProvider(model)}:${modelName(model)}`;
-}
-
-function providerWideKey(provider: string) {
-  return `${provider}:*`;
-}
-
-function selectionKey(model: ModelRef) {
-  return model.model ? modelKey(model) : providerWideKey(model.provider);
-}
-
 function modelLabel(model: ModelListItem | ModelRef) {
   if ('label' in model && model.label) return model.label;
   const provider = modelProvider(model);
   const name = modelName(model);
   return provider && provider !== 'unknown' ? `${provider} / ${name}` : name;
-}
-
-function enabledModels(models: ModelListItem[]) {
-  return models.filter((model) => model.enabled !== false && modelName(model));
-}
-
-function groupModelsByProvider(models: ModelListItem[]) {
-  return enabledModels(models).reduce<Record<string, ModelListItem[]>>((groups, model) => {
-    const provider = modelProvider(model);
-    groups[provider] = groups[provider] || [];
-    groups[provider].push(model);
-    return groups;
-  }, {});
 }
 
 function displayKeyHint(parentKey?: AdminParentKey | null) {
@@ -740,9 +708,9 @@ function AgentControlsModal({
                           />
                         </label>
 
-                        <div className="admin-destination-list" role="listbox" aria-label="Destination users">
-                          {destinationOptions.length ? (
-                            destinationOptions.map((candidate) => {
+                        {destinationOptions.length ? (
+                          <div className="admin-destination-list" role="listbox" aria-label="Destination users">
+                            {destinationOptions.map((candidate) => {
                               const selected = candidate.id === destinationUserId;
                               const hasKey = !!candidate.current_parent_key || (candidate.active_parent_key_count || 0) > 0;
                               return (
@@ -767,11 +735,11 @@ function AgentControlsModal({
                                   </Badge>
                                 </button>
                               );
-                            })
-                          ) : (
-                            <p className="admin-muted">No users match that search.</p>
-                          )}
-                        </div>
+                            })}
+                          </div>
+                        ) : (
+                          <p className="admin-muted">No users match that search.</p>
+                        )}
 
                         <label className="admin-transfer-field">
                           <span>Reason</span>
@@ -786,7 +754,7 @@ function AgentControlsModal({
 
                         <p className="admin-transfer-warning">
                           {name} will lose manager access to this agent. {destinationUser ? displayName(destinationUser) : 'The destination owner'} will
-                          gain access. Existing agnt_key credentials remain unchanged and keep working.
+                          gain access. Existing agent key credentials remain unchanged and keep working.
                         </p>
 
                         {transferError && <p className="dialog-copy danger-copy">{transferError}</p>}

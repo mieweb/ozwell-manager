@@ -1805,11 +1805,64 @@ body {
   padding-top: 10px;
 }
 
+/* Server-wide access sits outside the user workspace, so it needs its own surface rather than the
+   divider rule that separates sections inside the inspector. */
+/* Collapsed server-model row. One line in the console; the editor itself lives in a modal. */
+.admin-server-models-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--mieweb-border, #dce4ec);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--mieweb-card, #fff);
+}
+
+.admin-server-models-bar > div {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
+}
+
+.admin-server-models-bar .eyebrow {
+  margin: 0;
+  flex-basis: 100%;
+}
+
+.admin-server-models-bar strong {
+  color: var(--mieweb-foreground, #172033);
+  font-size: 15px;
+  font-weight: 720;
+}
+
+.admin-server-models-bar .admin-muted {
+  font-size: 13px;
+}
+
+/* Inside the modal the editor is the whole dialog, so it needs no border of its own. */
+.model-access-modal .model-restrictions {
+  border-top: 0;
+  padding-top: 0;
+}
+
+
+
+/* Wraps to stacked rows in the narrow user inspector, where a fixed two-column split squeezed the
+   heading onto three lines. */
 .model-restrictions-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: start;
+  justify-content: space-between;
   gap: 10px;
+}
+
+.model-restrictions-head > div {
+  flex: 1 1 190px;
+  min-width: 0;
 }
 
 .model-restrictions-actions {

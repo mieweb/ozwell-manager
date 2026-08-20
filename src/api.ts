@@ -84,6 +84,15 @@ export type ModelRestrictionsResponse = {
   effective_models: ModelListItem[];
 };
 
+// discovered_models is the unfiltered registry. The server-wide policy narrows every other model
+// list, including listModels(), so the picker must choose from this instead — otherwise a model
+// excluded by the current policy could never be re-enabled.
+export type ServerModelRestrictionsResponse = {
+  allowed_models: ModelRef[];
+  discovered_models: ModelListItem[];
+  effective_models: ModelListItem[];
+};
+
 export type AgentModelPolicyResponse = {
   agent_id: string;
   default_model: ModelRef | null;
@@ -442,6 +451,18 @@ export function revokeAdminParentKey(keyId: string, reason = 'admin_revoked') {
       body: JSON.stringify({ reason }),
     },
   );
+}
+
+export function getServerModelRestrictions() {
+  return request<ServerModelRestrictionsResponse>('/v1/manager/admin/model-restrictions', { cache: 'no-store' });
+}
+
+export function updateServerModelRestrictions(allowedModels: ModelRef[]) {
+  return request<ServerModelRestrictionsResponse>('/v1/manager/admin/model-restrictions', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ allowed_models: allowedModels }),
+  });
 }
 
 export function getModelRestrictions(parentKeyId: string) {

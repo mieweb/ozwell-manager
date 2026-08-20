@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
   Badge,
   Button,
   Card,
@@ -7,11 +10,14 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  Checkbox,
   Modal,
   ModalBody,
   ModalFooter,
   ModalHeader,
   ModalTitle,
+  Radio,
+  RadioGroup,
   SpinnerWithLabel,
   Table,
   TableBody,
@@ -39,6 +45,7 @@ import {
   getAdminUser,
   getAdminUserQuota,
   getModelRestrictions,
+  getServerModelRestrictions,
   listModels,
   listAdminUsers,
   promoteAdminUser,
@@ -46,6 +53,7 @@ import {
   transferAdminAgent,
   updateAdminAgentQuota,
   updateModelRestrictions,
+  updateServerModelRestrictions,
   updateAdminUserQuota,
 } from './api';
 import {
@@ -794,13 +802,46 @@ function AgentControlsModal({
   );
 }
 
+// One picker, two scopes. 'key' restricts a single user's Ozwell key; 'server' restricts the whole
+// server and sits outside the selected-user panel. Keeping a single component means the two controls
+// can never drift apart visually or behaviourally.
+type RestrictionScope = 'key' | 'server';
+
+function restrictionSummary(scope: RestrictionScope, restricted: boolean, approvedCount: number, totalCount: number) {
+  if (scope !== 'server') {
+    // Names the level above, so it is obvious this narrows the approved list rather than replacing it.
+    return restricted
+      ? `This user can use ${approvedCount} of the ${totalCount} approved models.`
+      : `This user can use all ${totalCount} approved models.`;
+  }
+  if (!restricted) return `Everyone here can use all ${totalCount} models.`;
+  return `Everyone here can use ${approvedCount} of ${totalCount} models.`;
+}
+
+function saveSuccessMessage(scope: RestrictionScope, selectedCount: number) {
+  if (scope !== 'server') {
+    return selectedCount ? 'Model restrictions updated.' : 'Model restrictions reset.';
+  }
+  return selectedCount
+    ? 'Approved models updated. Everyone sees the change straight away.'
+    : 'Every model is approved again. Everyone sees the change straight away.';
+}
+
 function ModelRestrictionsEditor({
   parentKey,
   allModels,
+  scope = 'key',
+  onSaved,
+  onCancel,
 }: {
   parentKey: AdminParentKey | null;
   allModels: ModelListItem[];
+  scope?: RestrictionScope;
+  onSaved?: () => void;
+  /** Given when the editor is in a dialog: the second button becomes Cancel and closes it. */
+  onCancel?: () => void;
 }) {
+  const isServer = scope === 'server';
   const [filterQuery, setFilterQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -809,14 +850,20 @@ function ModelRestrictionsEditor({
   const [allowedKeys, setAllowedKeys] = useState<Set<string>>(new Set());
   const [unrestricted, setUnrestricted] = useState(true);
   const [effectiveModels, setEffectiveModels] = useState<ModelListItem[]>([]);
+  const [discoveredModels, setDiscoveredModels] = useState<ModelListItem[]>([]);
 
-  const groupedModels = useMemo(() => groupModelsByProvider(allModels), [allModels]);
+  // The server policy narrows listModels(), so the server picker must offer the unfiltered
+  // discovered list or an excluded model could never be re-enabled.
+  const sourceModels = isServer ? discoveredModels : allModels;
+  const ready = isServer || Boolean(parentKey);
+
+  const groupedModels = useMemo(() => groupModelsByProvider(sourceModels), [sourceModels]);
   const providerNames = useMemo(() => Object.keys(groupedModels).sort(), [groupedModels]);
   const restrictionsEnabled = !unrestricted;
   const selectedKeys = useMemo(() => {
     if (!unrestricted) return allowedKeys;
-    return new Set(enabledModels(allModels).map(modelKey));
-  }, [allowedKeys, allModels, unrestricted]);
+    return new Set(enabledModels(sourceModels).map(modelKey));
+  }, [allowedKeys, sourceModels, unrestricted]);
   const filteredGrouped = useMemo(() => {
     if (!filterQuery.trim()) return groupedModels;
     const query = filterQuery.toLowerCase();
@@ -829,16 +876,26 @@ function ModelRestrictionsEditor({
   }, [filterQuery, groupedModels]);
   const filteredProviderNames = useMemo(() => Object.keys(filteredGrouped).sort(), [filteredGrouped]);
 
+  function applyRestrictions(allowed?: ModelRef[], effective?: ModelListItem[]) {
+    setAllowedKeys(new Set((allowed || []).map(selectionKey)));
+    setUnrestricted((allowed || []).length === 0);
+    setEffectiveModels(effective || []);
+  }
+
   async function loadRestrictions() {
-    if (!parentKey) return;
+    if (!ready) return;
     setLoading(true);
     setError('');
     setSuccess('');
     try {
-      const restrictions = await getModelRestrictions(parentKey.id);
-      setAllowedKeys(new Set((restrictions.allowed_models || []).map(selectionKey)));
-      setUnrestricted((restrictions.allowed_models || []).length === 0);
-      setEffectiveModels(restrictions.effective_models || []);
+      if (isServer) {
+        const restrictions = await getServerModelRestrictions();
+        applyRestrictions(restrictions.allowed_models, restrictions.effective_models);
+        setDiscoveredModels(restrictions.discovered_models || []);
+      } else if (parentKey) {
+        const restrictions = await getModelRestrictions(parentKey.id);
+        applyRestrictions(restrictions.allowed_models, restrictions.effective_models);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load model restrictions.');
     } finally {
@@ -851,7 +908,7 @@ function ModelRestrictionsEditor({
     setUnrestricted(true);
     setEffectiveModels([]);
     void loadRestrictions();
-  }, [parentKey?.id]);
+  }, [scope, parentKey?.id]);
 
   function providerSelected(provider: string) {
     const models = groupedModels[provider] || [];
@@ -861,6 +918,10 @@ function ModelRestrictionsEditor({
   function modelSelected(model: ModelListItem) {
     return selectedKeys.has(providerWideKey(modelProvider(model))) || selectedKeys.has(modelKey(model));
   }
+
+  // For the server scope this must reflect the current ticks, not the last save, because the label
+  // promises what happens after saving. The per-key scope keeps showing what the API returned.
+  const previewModels = isServer ? sourceModels.filter(modelSelected) : effectiveModels;
 
   function setProvider(provider: string, enabled: boolean) {
     const next = new Set(selectedKeys);
@@ -881,7 +942,10 @@ function ModelRestrictionsEditor({
     for (const item of providerModels) {
       const key = modelKey(item);
       if (key === modelKey(model)) {
+        // next is seeded from selectedKeys, so unchecking has to delete — skipping the add leaves
+        // the model selected and the checkbox never turns off.
         if (enabled) next.add(key);
+        else next.delete(key);
       } else if (modelSelected(item)) {
         next.add(key);
       }
@@ -893,16 +957,16 @@ function ModelRestrictionsEditor({
   function enableRestrictions() {
     if (!unrestricted) return;
     setUnrestricted(false);
-    setAllowedKeys(new Set(enabledModels(allModels).map(modelKey)));
+    setAllowedKeys(new Set(enabledModels(sourceModels).map(modelKey)));
   }
 
   async function saveRestrictions(nextKeys = allowedKeys) {
-    if (!parentKey) return;
+    if (!ready) return;
     setSaving(true);
     setError('');
     setSuccess('');
     try {
-      const enabled = enabledModels(allModels);
+      const enabled = enabledModels(sourceModels);
       const providers = Array.from(new Set(enabled.map(modelProvider))).sort();
       const allowedModels = nextKeys.size
         ? providers.flatMap((provider) => {
@@ -912,12 +976,18 @@ function ModelRestrictionsEditor({
               .map((model) => ({ provider, model: modelName(model) }));
           })
         : [];
-      const saved = await updateModelRestrictions(parentKey.id, allowedModels);
-      setAllowedKeys(new Set((saved.allowed_models || []).map(selectionKey)));
-      setUnrestricted((saved.allowed_models || []).length === 0);
-      setEffectiveModels(saved.effective_models || []);
-      setSuccess(nextKeys.size ? 'Model restrictions updated.' : 'Model restrictions reset.');
+      if (isServer) {
+        const saved = await updateServerModelRestrictions(allowedModels);
+        applyRestrictions(saved.allowed_models, saved.effective_models);
+        setDiscoveredModels(saved.discovered_models || discoveredModels);
+      } else if (parentKey) {
+        const saved = await updateModelRestrictions(parentKey.id, allowedModels);
+        applyRestrictions(saved.allowed_models, saved.effective_models);
+      }
+      setSuccess(saveSuccessMessage(scope, nextKeys.size));
       window.dispatchEvent(new Event('ozwell:notifications-refresh'));
+      // A server change narrows every other model list in the console, so refresh them.
+      onSaved?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to save model restrictions.');
     } finally {
@@ -936,50 +1006,53 @@ function ModelRestrictionsEditor({
     <div className="admin-inspector-section model-restrictions">
       <div className="model-restrictions-head">
         <div>
-          <h4>Model restrictions</h4>
+          {/* The server scope lives in a dialog that already carries the title. */}
+          {!isServer && <h4>Models this user can pick</h4>}
           <p className="admin-muted">
-            {restrictionsEnabled ? 'Only selected models are available for this Ozwell key.' : 'All enabled models allowed.'}
+            {restrictionSummary(scope, restrictionsEnabled, previewModels.length, sourceModels.length)}
           </p>
-        </div>
-        <div className="model-restrictions-actions">
-          <Button variant="secondary" size="sm" type="button" disabled={!parentKey || loading || saving} onClick={() => saveRestrictions()}>
-            {saving ? 'Saving...' : 'Save'}
-          </Button>
-          <Button variant="secondary" size="sm" type="button" disabled={!parentKey || loading || saving} onClick={resetRestrictions}>
-            Reset model restrictions
-          </Button>
         </div>
       </div>
 
-      {!parentKey && <p className="admin-muted">No active Ozwell key.</p>}
-      {parentKey && loading && <SpinnerWithLabel label="Loading model restrictions" />}
+      {!ready && <p className="admin-muted">No active Ozwell key.</p>}
+      {ready && loading && <SpinnerWithLabel label={isServer ? 'Loading server model access' : 'Loading model restrictions'} />}
       {error && <p className="dialog-copy danger-copy">{error}</p>}
       {success && <p className="dialog-copy success-copy">{success}</p>}
 
-      {parentKey && providerNames.length > 0 && (
+      {ready && providerNames.length > 0 && (
         <>
-          <div className="agent-model-mode-toggle">
-            <button
-              type="button"
-              className={`agent-model-mode-btn${unrestricted ? ' active' : ''}`}
-              onClick={() => {
+          {/* Two states of one policy, so radios rather than a segmented control, which reads as a
+              switch between views. */}
+          <RadioGroup
+            name={`model-access-${scope}`}
+            value={unrestricted ? 'any' : 'selected'}
+            onValueChange={(value) => {
+              if (value === 'any') {
                 setUnrestricted(true);
                 setAllowedKeys(new Set());
-              }}
-              disabled={loading || saving}
-            >
-              Any model
-            </button>
-            <button
-              type="button"
-              className={`agent-model-mode-btn${!unrestricted ? ' active' : ''}`}
-              onClick={enableRestrictions}
-              disabled={loading || saving}
-            >
-              Specific models
-              {!unrestricted && <span className="agent-model-mode-count">{allowedKeys.size}</span>}
-            </button>
-          </div>
+              } else {
+                enableRestrictions();
+              }
+            }}
+            disabled={loading || saving}
+          >
+            <Radio
+              value="any"
+              label={isServer ? 'Approve every model' : 'Allow every approved model'}
+              description={
+                isServer ? 'Including any model added later.' : 'Including any model approved later.'
+              }
+            />
+            <Radio
+              value="selected"
+              label={isServer ? 'Approve only selected models' : 'Allow only selected models'}
+              description={
+                isServer
+                  ? 'Everything else disappears from model pickers for everyone.'
+                  : 'Everything else disappears from this user’s model pickers.'
+              }
+            />
+          </RadioGroup>
 
           {!unrestricted && (
             <input
@@ -994,7 +1067,13 @@ function ModelRestrictionsEditor({
 
           <div className="model-restrictions-groups">
             {unrestricted ? (
-              <p className="admin-muted">All enabled models are allowed for this Ozwell key.</p>
+              // The summary line above already says this for the server scope; repeating it here
+              // just gave the dialog two sentences saying the same thing.
+              isServer ? null : (
+                <p className="admin-muted">
+                  This user can pick from every approved model. Narrowing here only affects this user.
+                </p>
+              )
             ) : filteredProviderNames.length ? (
               filteredProviderNames.map((provider) => {
                 const providerList = filteredGrouped[provider] || [];
@@ -1010,25 +1089,25 @@ function ModelRestrictionsEditor({
                       </span>
                     </summary>
                     <div className="model-option-list">
-                      <label className="model-option model-provider-toggle-row">
-                        <input
-                          type="checkbox"
-                          checked={providerSelected(provider)}
-                          disabled={loading || saving}
-                          onChange={(event) => setProvider(provider, event.target.checked)}
-                        />
-                        <span>All {providerLabel(provider)} models</span>
-                      </label>
+                      {/* Indeterminate when only part of a provider is selected, so a half-picked
+                          group no longer looks identical to an untouched one. */}
+                      <Checkbox
+                        className="model-option model-provider-toggle-row"
+                        label={`All ${providerLabel(provider)} models`}
+                        checked={providerSelected(provider)}
+                        indeterminate={selectedCount > 0 && selectedCount < providerList.length}
+                        disabled={loading || saving}
+                        onChange={(event) => setProvider(provider, event.target.checked)}
+                      />
                       {providerList.map((model) => (
-                        <label className="model-option model-option-indent" key={modelKey(model)}>
-                          <input
-                            type="checkbox"
-                            checked={modelSelected(model)}
-                            disabled={loading || saving}
-                            onChange={(event) => setModel(model, event.target.checked)}
-                          />
-                          <span>{modelLabel(model)}</span>
-                        </label>
+                        <Checkbox
+                          key={modelKey(model)}
+                          className="model-option model-option-indent"
+                          label={modelLabel(model)}
+                          checked={modelSelected(model)}
+                          disabled={loading || saving}
+                          onChange={(event) => setModel(model, event.target.checked)}
+                        />
                       ))}
                     </div>
                   </details>
@@ -1039,25 +1118,69 @@ function ModelRestrictionsEditor({
             )}
           </div>
 
-          <div className="effective-models">
-            <span>Effective models</span>
-            {effectiveModels.length ? (
-              <div className="model-chip-list" aria-label={`${effectiveModels.length} effective models`}>
-                <strong>{effectiveModels.length}</strong>
-                {effectiveModels.slice(0, 8).map((model) => (
-                  <span className="model-chip" key={modelKey(model)}>
-                    {modelLabel(model)}
-                  </span>
-                ))}
-                {effectiveModels.length > 8 && <span className="model-chip">+{effectiveModels.length - 8} more</span>}
-              </div>
+          {/* Says what Save does, before it is pressed. The old panel never stated the consequence. */}
+          {isServer && restrictionsEnabled && (
+            allowedKeys.size === 0 ? (
+              <Alert variant="warning">
+                <AlertTitle>Nothing is selected</AlertTitle>
+                <AlertDescription>
+                  An empty list means no restriction, so saving now would approve every model again. Pick at least one
+                  model to narrow the list.
+                </AlertDescription>
+              </Alert>
             ) : (
-              <strong>None returned</strong>
-            )}
-          </div>
+              <Alert variant="info">
+                <AlertDescription>
+                  After saving, everyone here can use {previewModels.length} of {sourceModels.length} models.
+                </AlertDescription>
+              </Alert>
+            )
+          )}
+
+          {!isServer && (
+            <div className="effective-models">
+              <span>Effective models</span>
+              {previewModels.length ? (
+                <div className="model-chip-list" aria-label={`${previewModels.length} effective models`}>
+                  <strong>{previewModels.length}</strong>
+                  {previewModels.slice(0, 8).map((model) => (
+                    <span className="model-chip" key={modelKey(model)}>
+                      {modelLabel(model)}
+                    </span>
+                  ))}
+                  {previewModels.length > 8 && <span className="model-chip">+{previewModels.length - 8} more</span>}
+                </div>
+              ) : (
+                <strong>None returned</strong>
+              )}
+            </div>
+          )}
         </>
       )}
-      {parentKey && !loading && providerNames.length === 0 && <p className="admin-muted">No discovered models returned.</p>}
+      {ready && !loading && providerNames.length === 0 && <p className="admin-muted">No discovered models returned.</p>}
+
+      {/* Actions sit last, where a dialog puts them. Kept inside the editor because it owns the
+          saving state; lifting them into ModalFooter would mean exposing save() to the parent. */}
+      <div className="model-restrictions-actions">
+        <Button
+          variant={isServer ? 'primary' : 'secondary'}
+          size="sm"
+          type="button"
+          disabled={!ready || loading || saving || (restrictionsEnabled && allowedKeys.size === 0)}
+          onClick={() => saveRestrictions()}
+        >
+          {saving ? 'Saving...' : 'Save'}
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          type="button"
+          disabled={!ready || loading || saving}
+          onClick={onCancel ?? resetRestrictions}
+        >
+          {onCancel ? 'Cancel' : 'Reset'}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -1208,6 +1331,10 @@ export function AdminConsole() {
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [confirmError, setConfirmError] = useState('');
+  const [modelAccessOpen, setModelAccessOpen] = useState(false);
+  // Summary for the collapsed bar. listModels() is already narrowed by this policy, so the totals
+  // have to come from the policy endpoint itself, which also returns the unfiltered registry.
+  const [serverModels, setServerModels] = useState<{ allowed: number; approved: number; discovered: number } | null>(null);
 
   async function loadAdmin() {
     setState('loading');
@@ -1217,6 +1344,17 @@ export function AdminConsole() {
       setSummary(nextSummary);
       setUsers(nextUsers);
       setModels(nextModels);
+      // Loaded on its own: this endpoint only exists once the matching API change is deployed, and a
+      // slow or missing one must not take the whole console down with it.
+      getServerModelRestrictions()
+        .then((nextServer) =>
+          setServerModels({
+            allowed: (nextServer.allowed_models || []).length,
+            approved: (nextServer.effective_models || []).length,
+            discovered: (nextServer.discovered_models || []).length,
+          }),
+        )
+        .catch(() => setServerModels(null));
       setState('ready');
       return nextUsers;
     } catch (err) {
@@ -1354,6 +1492,25 @@ export function AdminConsole() {
       <CardContent className="admin-content">
         <SummaryMetrics summary={summary} />
 
+        {/* Server-wide, so it sits outside the workspace grid and is never tied to a selected user. */}
+        {/* One line in the console, the panel itself in a modal. It is a rarely-touched setting, so it
+            should not take a screenful above the table people actually came here for. */}
+        <div className="admin-server-models-bar">
+          <div>
+            <strong>Approved models</strong>
+            <span className="admin-muted">
+              {!serverModels
+                ? 'Everyone here can use these.'
+                : serverModels.allowed === 0
+                  ? `Everyone here can use all ${serverModels.discovered} models.`
+                  : `Everyone here can use ${serverModels.approved} of ${serverModels.discovered} models.`}
+            </span>
+          </div>
+          <Button variant="secondary" size="sm" type="button" onClick={() => setModelAccessOpen(true)}>
+            Change
+          </Button>
+        </div>
+
         <div className={selectedDetail ? 'admin-workspace' : 'admin-workspace table-only'}>
           <section className="admin-section">
             <div className="admin-section-head">
@@ -1379,6 +1536,31 @@ export function AdminConsole() {
           />
         </div>
       </CardContent>
+
+      {modelAccessOpen && (
+        <Modal open onOpenChange={(open) => !open && setModelAccessOpen(false)} size="lg" aria-labelledby="server-model-access-title">
+          <ModalHeader>
+            <div>
+              <ModalTitle id="server-model-access-title">Approved models</ModalTitle>
+            </div>
+            <Badge variant="warning" size="sm">
+              Affects everyone
+            </Badge>
+          </ModalHeader>
+          <ModalBody className="model-access-modal">
+            <ModelRestrictionsEditor
+              scope="server"
+              parentKey={null}
+              allModels={models}
+              onSaved={() => {
+                setModelAccessOpen(false);
+                void loadAdmin();
+              }}
+              onCancel={() => setModelAccessOpen(false)}
+            />
+          </ModalBody>
+        </Modal>
+      )}
 
       {confirmAction && (
         <ConfirmModal

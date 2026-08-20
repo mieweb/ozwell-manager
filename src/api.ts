@@ -221,7 +221,7 @@ export class ApiError extends Error {
 
 const configuredBaseUrl = import.meta.env.VITE_OZWELL_API_BASE_URL || '';
 export const apiBaseUrl = configuredBaseUrl.replace(/\/+$/, '');
-const requestTimeoutMs = Number(import.meta.env.VITE_OZWELL_API_TIMEOUT_MS || 20000);
+const requestTimeoutMs = Number(import.meta.env.VITE_OZWELL_API_TIMEOUT_MS) || 20000;
 
 async function parseResponse(response: Response) {
   const text = await response.text();

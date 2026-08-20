@@ -740,9 +740,9 @@ function AgentControlsModal({
                           />
                         </label>
 
-                        <div className="admin-destination-list" role="listbox" aria-label="Destination users">
-                          {destinationOptions.length ? (
-                            destinationOptions.map((candidate) => {
+                        {destinationOptions.length ? (
+                          <div className="admin-destination-list" role="listbox" aria-label="Destination users">
+                            {destinationOptions.map((candidate) => {
                               const selected = candidate.id === destinationUserId;
                               const hasKey = !!candidate.current_parent_key || (candidate.active_parent_key_count || 0) > 0;
                               return (
@@ -767,11 +767,11 @@ function AgentControlsModal({
                                   </Badge>
                                 </button>
                               );
-                            })
-                          ) : (
-                            <p className="admin-muted">No users match that search.</p>
-                          )}
-                        </div>
+                            })}
+                          </div>
+                        ) : (
+                          <p className="admin-muted">No users match that search.</p>
+                        )}
 
                         <label className="admin-transfer-field">
                           <span>Reason</span>
@@ -786,7 +786,7 @@ function AgentControlsModal({
 
                         <p className="admin-transfer-warning">
                           {name} will lose manager access to this agent. {destinationUser ? displayName(destinationUser) : 'The destination owner'} will
-                          gain access. Existing agnt_key credentials remain unchanged and keep working.
+                          gain access. Existing agent key credentials remain unchanged and keep working.
                         </p>
 
                         {transferError && <p className="dialog-copy danger-copy">{transferError}</p>}

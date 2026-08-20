@@ -931,6 +931,10 @@ function AgentEditorPage({
       setError('Default model is not in the allowed list. Fix the model policy before saving.');
       return;
     }
+    if (policyLoading) {
+      setError('Model policy is still loading. Wait for it to finish before saving.');
+      return;
+    }
     setSaving(true);
     setError('');
     try {

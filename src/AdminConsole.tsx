@@ -48,6 +48,16 @@ import {
   updateModelRestrictions,
   updateAdminUserQuota,
 } from './api';
+import {
+  enabledModels,
+  groupModelsByProvider,
+  modelKey,
+  modelName,
+  modelProvider,
+  providerLabel,
+  providerWideKey,
+  selectionKey,
+} from './models';
 
 type ConfirmAction = {
   title: string;
@@ -59,53 +69,11 @@ type ConfirmAction = {
 
 type AdminState = 'loading' | 'ready' | 'error' | 'access-denied';
 
-function modelProvider(model: ModelListItem | ModelRef) {
-  return model.provider || 'unknown';
-}
-
-function providerLabel(provider: string) {
-  const labels: Record<string, string> = {
-    anthropic: 'Anthropic',
-    ollama: 'Ollama',
-    openai: 'OpenAI',
-  };
-  return labels[provider.toLowerCase()] || provider;
-}
-
-function modelName(model: ModelListItem | ModelRef) {
-  return model.model || ('id' in model ? model.id : '');
-}
-
-function modelKey(model: ModelListItem | ModelRef) {
-  return `${modelProvider(model)}:${modelName(model)}`;
-}
-
-function providerWideKey(provider: string) {
-  return `${provider}:*`;
-}
-
-function selectionKey(model: ModelRef) {
-  return model.model ? modelKey(model) : providerWideKey(model.provider);
-}
-
 function modelLabel(model: ModelListItem | ModelRef) {
   if ('label' in model && model.label) return model.label;
   const provider = modelProvider(model);
   const name = modelName(model);
   return provider && provider !== 'unknown' ? `${provider} / ${name}` : name;
-}
-
-function enabledModels(models: ModelListItem[]) {
-  return models.filter((model) => model.enabled !== false && modelName(model));
-}
-
-function groupModelsByProvider(models: ModelListItem[]) {
-  return enabledModels(models).reduce<Record<string, ModelListItem[]>>((groups, model) => {
-    const provider = modelProvider(model);
-    groups[provider] = groups[provider] || [];
-    groups[provider].push(model);
-    return groups;
-  }, {});
 }
 
 function displayKeyHint(parentKey?: AdminParentKey | null) {

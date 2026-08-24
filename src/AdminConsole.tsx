@@ -913,6 +913,10 @@ function ServerDefaultModelEditor({ onSaved }: { onSaved?: (saved: ModelRef | nu
 
   const dirty = (stored?.provider || '') !== provider || (stored?.model || '') !== model;
   const busy = loading || saving;
+  // The selection can be a model the allow-list does not permit — the environment's model is shown
+  // even when it is not approved, so the control reports what the server really uses. Saving that
+  // would come straight back as default_model_not_allowed, so it is caught here instead.
+  const modelApproved = Boolean(model) && providerModels.some((item) => modelName(item) === model);
 
   return (
     <div className="server-default-model">
@@ -957,7 +961,7 @@ function ServerDefaultModelEditor({ onSaved }: { onSaved?: (saved: ModelRef | nu
                   {/* The environment's model may not be in the approved list — an allow-list that
                       excludes it, or a name discovery has never returned. Shown anyway, so the
                       control still reports what the server is really using. */}
-                  {model && !providerModels.some((item) => modelName(item) === model) && (
+                  {model && !modelApproved && (
                     <option value={model}>{model} (not in the approved list)</option>
                   )}
                   {providerModels.map((item) => (
@@ -971,12 +975,18 @@ function ServerDefaultModelEditor({ onSaved }: { onSaved?: (saved: ModelRef | nu
               </p>
             </div>
 
+            {model && !modelApproved && (
+              <p className="agent-model-conflict-warning">
+                {model} is not approved below, so it cannot be the default. Approve it first, or pick another model.
+              </p>
+            )}
+
             <div className="model-restrictions-actions">
               <Button
                 variant="primary"
                 size="sm"
                 type="button"
-                disabled={busy || !dirty || !provider || !model}
+                disabled={busy || !dirty || !provider || !modelApproved}
                 onClick={() => save({ provider, model })}
               >
                 {saving ? 'Saving...' : 'Save default'}

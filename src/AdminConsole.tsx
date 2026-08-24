@@ -1525,14 +1525,16 @@ export function AdminConsole() {
       setModels(nextModels);
       // Loaded on its own: this endpoint only exists once the matching API change is deployed, and a
       // slow or missing one must not take the whole console down with it.
-      Promise.all([getServerModelRestrictions(), getServerDefaultModel()])
+      // The default-model endpoint is newer than the restrictions one, so it is caught separately:
+      // an API without it yet costs the fallback line, not the model counts beside it.
+      Promise.all([getServerModelRestrictions(), getServerDefaultModel().catch(() => null)])
         .then(([nextServer, nextDefault]) =>
           setServerModels({
             allowed: (nextServer.allowed_models || []).length,
             approved: (nextServer.effective_models || []).length,
             discovered: (nextServer.discovered_models || []).length,
-            defaultModel: nextDefault.default_model,
-            environmentModel: nextDefault.environment_model,
+            defaultModel: nextDefault?.default_model ?? null,
+            environmentModel: nextDefault?.environment_model,
           }),
         )
         .catch(() => setServerModels(null));

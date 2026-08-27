@@ -36,6 +36,7 @@ import {
   ApiError,
   ModelListItem,
   ModelRef,
+  ServerDefaultModelResponse,
   MonthlyQuota,
   MonthlyQuotaUpdate,
   UsageMetrics,
@@ -45,6 +46,7 @@ import {
   getAdminUser,
   getAdminUserQuota,
   getModelRestrictions,
+  getServerDefaultModel,
   getServerModelRestrictions,
   listModels,
   listAdminUsers,
@@ -53,6 +55,7 @@ import {
   transferAdminAgent,
   updateAdminAgentQuota,
   updateModelRestrictions,
+  updateServerDefaultModel,
   updateServerModelRestrictions,
   updateAdminUserQuota,
 } from './api';
@@ -827,6 +830,184 @@ function saveSuccessMessage(scope: RestrictionScope, selectedCount: number) {
     : 'Every model is approved again. Everyone sees the change straight away.';
 }
 
+// The model used when a request names none. Saves on its own, separately from the allow-list below
+// it: the two are different writes, and one failing must not roll back or block the other.
+// Deliberately mirrors the per-agent fallback controls in main.tsx — same wording, same markup, same
+// classes — since it is the same choice made at a different scope.
+// onSaved reports the new value rather than asking the console to reload. Reloading would refetch
+// the model registry — seconds of discovery — and unmount this dialog mid-edit.
+function ServerDefaultModelEditor({ onSaved }: { onSaved?: (saved: ModelRef | null) => void }) {
+  const [models, setModels] = useState<ModelListItem[]>([]);
+  const [stored, setStored] = useState<ModelRef | null>(null);
+  const [environment, setEnvironment] = useState<{ provider: string; model: string } | null>(null);
+  const [provider, setProvider] = useState('');
+  const [model, setModel] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const grouped = useMemo(() => groupModelsByProvider(models), [models]);
+  const providerNames = useMemo(() => Object.keys(grouped).sort(), [grouped]);
+  const providerModels = useMemo(() => grouped[provider] || [], [grouped, provider]);
+
+  // With nothing stored the controls show the environment's fallback rather than sitting empty —
+  // the server is always using something, and an empty pair claims otherwise. Saving then pins that
+  // value, which is a reasonable thing to want.
+  function applyResponse(response: ServerDefaultModelResponse) {
+    const shown = response.default_model || response.environment_model;
+    setStored(response.default_model);
+    setEnvironment(response.environment_model ?? null);
+    setModels(response.effective_models || []);
+    setProvider(shown?.provider || '');
+    setModel(shown?.model || '');
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    getServerDefaultModel()
+      .then((response) => {
+        if (!cancelled) applyResponse(response);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Unable to load the default model.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Switching provider carries the model with it only when that provider also has it; otherwise the
+  // first model of the new provider, so the pair is never a combination the server would reject.
+  function changeProvider(nextProvider: string) {
+    const list = grouped[nextProvider] || [];
+    const keptModel = list.find((item) => modelName(item) === model);
+    setProvider(nextProvider);
+    setModel(modelName(keptModel || list[0] || { provider: nextProvider, model: '' }));
+  }
+
+  async function save(nextDefault: ModelRef | null) {
+    setSaving(true);
+    setError('');
+    setSuccess('');
+    try {
+      const response = await updateServerDefaultModel(nextDefault);
+      applyResponse(response);
+      setSuccess(
+        response.default_model
+          ? `Requests that name no model now use ${providerLabel(response.default_model.provider)} ${response.default_model.model}.`
+          : response.environment_model
+            ? `Back to the server environment, which uses ${response.environment_model.model}.`
+            : 'Default model cleared. The server falls back to its environment setting.',
+      );
+      onSaved?.(response.default_model);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to save the default model.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const dirty = (stored?.provider || '') !== provider || (stored?.model || '') !== model;
+  const busy = loading || saving;
+  // The selection can be a model the allow-list does not permit — the environment's model is shown
+  // even when it is not approved, so the control reports what the server really uses. Saving that
+  // would come straight back as default_model_not_allowed, so it is caught here instead.
+  const modelApproved = Boolean(model) && providerModels.some((item) => modelName(item) === model);
+
+  return (
+    <div className="server-default-model">
+      <div className="server-default-model-head">
+        <h4>Default model</h4>
+        <p className="admin-muted">
+          {stored
+            ? `Requests that name no model use ${providerLabel(stored.provider)} ${stored.model}, set here.`
+            : environment
+              ? `Requests that name no model use ${providerLabel(environment.provider)} ${environment.model}, from the server environment. Saving here overrides it.`
+              : 'Requests that name no model use the model set in the server environment.'}
+        </p>
+      </div>
+
+      {loading && <SpinnerWithLabel label="Loading the default model" />}
+      {error && <p className="dialog-copy danger-copy">{error}</p>}
+      {success && <p className="dialog-copy success-copy">{success}</p>}
+
+      {!loading && providerNames.length === 0 ? (
+        <p className="admin-muted">No approved models to choose from. Approve at least one below first.</p>
+      ) : (
+        !loading && (
+          <>
+            <div className="agent-model-defaults">
+              <label>
+                <span>Fallback provider</span>
+                <select value={provider} onChange={(event) => changeProvider(event.target.value)} disabled={busy}>
+                  <option value="">None</option>
+                  {providerNames.map((name) => (
+                    <option key={name} value={name}>{providerLabel(name)}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Fallback model</span>
+                <select
+                  value={model}
+                  onChange={(event) => setModel(event.target.value)}
+                  disabled={busy || !providerModels.length}
+                >
+                  <option value="">None</option>
+                  {/* The environment's model may not be in the approved list — an allow-list that
+                      excludes it, or a name discovery has never returned. Shown anyway, so the
+                      control still reports what the server is really using. */}
+                  {model && !modelApproved && (
+                    <option value={model}>{model} (not in the approved list)</option>
+                  )}
+                  {providerModels.map((item) => (
+                    <option key={modelKey(item)} value={modelName(item)}>{modelName(item)}</option>
+                  ))}
+                </select>
+              </label>
+              <p className="agent-model-restriction-hint">
+                Used when a request does not specify a model. Only approved models are listed, and the change applies
+                to the next request — no restart.
+              </p>
+            </div>
+
+            {model && !modelApproved && (
+              <p className="agent-model-conflict-warning">
+                {model} is not approved below, so it cannot be the default. Approve it first, or pick another model.
+              </p>
+            )}
+
+            <div className="model-restrictions-actions">
+              <Button
+                variant="primary"
+                size="sm"
+                type="button"
+                disabled={busy || !dirty || !provider || !modelApproved}
+                onClick={() => save({ provider, model })}
+              >
+                {saving ? 'Saving...' : 'Save default'}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                type="button"
+                disabled={busy || !stored}
+                onClick={() => save(null)}
+              >
+                Use environment default
+              </Button>
+            </div>
+          </>
+        )
+      )}
+    </div>
+  );
+}
+
 function ModelRestrictionsEditor({
   parentKey,
   allModels,
@@ -1334,7 +1515,15 @@ export function AdminConsole() {
   const [modelAccessOpen, setModelAccessOpen] = useState(false);
   // Summary for the collapsed bar. listModels() is already narrowed by this policy, so the totals
   // have to come from the policy endpoint itself, which also returns the unfiltered registry.
-  const [serverModels, setServerModels] = useState<{ allowed: number; approved: number; discovered: number } | null>(null);
+  const [serverModels, setServerModels] = useState<{
+    allowed: number;
+    approved: number;
+    discovered: number;
+    defaultModel: ModelRef | null;
+    // Optional: a manager deployed ahead of the matching API gets a response without this field.
+    // Never dereferenced unguarded — a missing field must degrade the sentence, not blank the page.
+    environmentModel?: { provider: string; model: string };
+  } | null>(null);
 
   async function loadAdmin() {
     setState('loading');
@@ -1346,12 +1535,16 @@ export function AdminConsole() {
       setModels(nextModels);
       // Loaded on its own: this endpoint only exists once the matching API change is deployed, and a
       // slow or missing one must not take the whole console down with it.
-      getServerModelRestrictions()
-        .then((nextServer) =>
+      // The default-model endpoint is newer than the restrictions one, so it is caught separately:
+      // an API without it yet costs the fallback line, not the model counts beside it.
+      Promise.all([getServerModelRestrictions(), getServerDefaultModel().catch(() => null)])
+        .then(([nextServer, nextDefault]) =>
           setServerModels({
             allowed: (nextServer.allowed_models || []).length,
             approved: (nextServer.effective_models || []).length,
             discovered: (nextServer.discovered_models || []).length,
+            defaultModel: nextDefault?.default_model ?? null,
+            environmentModel: nextDefault?.environment_model,
           }),
         )
         .catch(() => setServerModels(null));
@@ -1497,7 +1690,7 @@ export function AdminConsole() {
             should not take a screenful above the table people actually came here for. */}
         <div className="admin-server-models-bar">
           <div>
-            <strong>Approved models</strong>
+            <strong>Model access</strong>
             <span className="admin-muted">
               {!serverModels
                 ? 'Everyone here can use these.'
@@ -1505,6 +1698,17 @@ export function AdminConsole() {
                   ? `Everyone here can use all ${serverModels.discovered} models.`
                   : `Everyone here can use ${serverModels.approved} of ${serverModels.discovered} models.`}
             </span>
+            {/* The fallback reads here too, so the current default is visible without opening the
+                modal. Loaded with the counts below, and absent while that request is in flight. */}
+            {serverModels && (
+              <span className="admin-muted">
+                {serverModels.defaultModel
+                  ? `Default ${serverModels.defaultModel.model}.`
+                  : serverModels.environmentModel
+                    ? `Default ${serverModels.environmentModel.model}, from the server environment.`
+                    : 'Default set in the server environment.'}
+              </span>
+            )}
           </div>
           <Button variant="secondary" size="sm" type="button" onClick={() => setModelAccessOpen(true)}>
             Change
@@ -1541,13 +1745,18 @@ export function AdminConsole() {
         <Modal open onOpenChange={(open) => !open && setModelAccessOpen(false)} size="lg" aria-labelledby="server-model-access-title">
           <ModalHeader>
             <div>
-              <ModalTitle id="server-model-access-title">Approved models</ModalTitle>
+              <ModalTitle id="server-model-access-title">Model access</ModalTitle>
             </div>
             <Badge variant="warning" size="sm">
               Affects everyone
             </Badge>
           </ModalHeader>
           <ModalBody className="model-access-modal">
+            {/* Which model is picked when none is asked for, above which models are allowed at all.
+                Its own save — the allow-list below can reject this one, never the reverse. */}
+            <ServerDefaultModelEditor
+              onSaved={(saved) => setServerModels((prev) => (prev ? { ...prev, defaultModel: saved } : prev))}
+            />
             <ModelRestrictionsEditor
               scope="server"
               parentKey={null}

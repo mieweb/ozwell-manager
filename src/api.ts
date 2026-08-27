@@ -93,6 +93,18 @@ export type ServerModelRestrictionsResponse = {
   effective_models: ModelListItem[];
 };
 
+// The model used when a request names none. Null means nothing is stored and the server falls back
+// to its own environment. effective_models is what a picker may offer: a fallback the server-wide
+// allow-list blocks is rejected on save.
+export type ServerDefaultModelResponse = {
+  default_model: ModelRef | null;
+  // What the server falls back to with nothing stored. There is always one, so the picker shows it
+  // rather than an empty control, which would read as "no fallback at all".
+  // Optional: an API deployed before this field shipped returns a response without it.
+  environment_model?: { provider: string; model: string };
+  effective_models: ModelListItem[];
+};
+
 export type AgentModelPolicyResponse = {
   agent_id: string;
   default_model: ModelRef | null;
@@ -462,6 +474,19 @@ export function updateServerModelRestrictions(allowedModels: ModelRef[]) {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ allowed_models: allowedModels }),
+  });
+}
+
+export function getServerDefaultModel() {
+  return request<ServerDefaultModelResponse>('/v1/manager/admin/default-model', { cache: 'no-store' });
+}
+
+// Passing null clears the fallback, which drops the server back to its environment value.
+export function updateServerDefaultModel(defaultModel: ModelRef | null) {
+  return request<ServerDefaultModelResponse>('/v1/manager/admin/default-model', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider: defaultModel?.provider ?? null, model: defaultModel?.model ?? null }),
   });
 }
 

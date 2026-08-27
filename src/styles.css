@@ -1848,6 +1848,28 @@ body {
   padding-top: 0;
 }
 
+/* Two settings, two saves, one modal. The rule is what keeps the second Save from reading as a
+   stray button belonging to the allow-list below it. */
+.server-default-model {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--mieweb-border, #dce4ec);
+}
+
+.server-default-model-head {
+  display: grid;
+  gap: 2px;
+}
+
+.server-default-model-head h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--mieweb-foreground, #172033);
+}
+
 
 
 /* Wraps to stacked rows in the narrow user inspector, where a fixed two-column split squeezed the

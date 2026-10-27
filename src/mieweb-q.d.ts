@@ -7,7 +7,12 @@ declare module '@mieweb/q' {
     showEditor?: boolean;
     onConfigChange?: (config: Record<string, unknown>) => void;
     onDownload?: (content: string, mode: 'yaml' | 'json') => void;
-    onSubmit?: (yaml: string) => void;
+    onSubmit?: (yaml: string, secrets: Record<string, string | null>) => void;
+    secretNames?: string[];
+    onDiscoverTools?: (
+      server: Record<string, unknown>,
+      secrets: Record<string, string | null>,
+    ) => Promise<Array<{ name: string; description?: string }>>;
   };
 
   export const AgentConfigGenerator: ComponentType<AgentConfigGeneratorProps>;

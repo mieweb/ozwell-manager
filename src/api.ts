@@ -46,7 +46,13 @@ export type AgentDetail = {
   temperature?: number;
   tools?: unknown;
   behavior?: unknown;
+  secret_names?: string[];
 };
+
+// Values are write-only; null deletes a stored secret, omitted names are kept.
+export type SecretsUpdate = Record<string, string | null>;
+
+export type McpToolInfo = { name: string; description?: string };
 
 export type KeyResponse = {
   agent_id: string;
@@ -263,6 +269,8 @@ function errorMessage(payload: unknown, fallback: string) {
     if (error?.code === 'destination_parent_key_not_found') return 'Destination user has no active Ozwell key.';
     if (error?.code === 'agent_already_owned_by_destination') return 'Agent is already owned by that user.';
     if (error?.code === 'agent_not_found') return 'Agent is missing or inaccessible.';
+    if (error?.code === 'mcp_discovery_failed') return `MCP tool discovery failed: ${error.message || 'server unreachable'}`;
+    if (error?.code === 'missing_secrets') return `${error.message || 'Missing MCP server credentials.'} Enter the credential and save again.`;
     if (error?.message) return error.message;
   }
   return fallback;
@@ -319,20 +327,31 @@ export function getAgent(agentId: string) {
   return request<AgentDetail>(`/v1/manager/agents/${encodeURIComponent(agentId)}`, { cache: 'no-store' });
 }
 
-export function createAgent(yaml: string) {
-  return request<KeyResponse>('/v1/manager/agents', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/yaml' },
-    body: yaml,
+function agentBody(yaml: string, secrets?: SecretsUpdate): RequestInit {
+  if (secrets && Object.keys(secrets).length) {
+    return { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ yaml, secrets }) };
+  }
+  return { headers: { 'Content-Type': 'application/yaml' }, body: yaml };
+}
+
+export function createAgent(yaml: string, secrets?: SecretsUpdate) {
+  return request<KeyResponse>('/v1/manager/agents', { method: 'POST', ...agentBody(yaml, secrets) });
+}
+
+export function updateAgent(agentId: string, yaml: string, secrets?: SecretsUpdate) {
+  return request<AgentDetail & { updated: true }>(`/v1/manager/agents/${encodeURIComponent(agentId)}`, {
+    method: 'PUT',
+    ...agentBody(yaml, secrets),
   });
 }
 
-export function updateAgent(agentId: string, yaml: string) {
-  return request<AgentDetail & { updated: true }>(`/v1/manager/agents/${encodeURIComponent(agentId)}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/yaml' },
-    body: yaml,
+export async function discoverMcpTools(server: unknown, secrets: SecretsUpdate, agentId?: string) {
+  const payload = await request<{ data?: McpToolInfo[] }>('/v1/manager/mcp/discover', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ server, secrets, ...(agentId ? { agent_id: agentId } : {}) }),
   });
+  return payload.data || [];
 }
 
 export function getAgentModelPolicy(agentId: string) {

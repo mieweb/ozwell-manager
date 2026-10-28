@@ -1,6 +1,6 @@
 import { StrictMode, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
-import { AgentConfigGenerator } from '@mieweb/q';
+import { AgentConfigGenerator, yamlToConfig } from '@mieweb/q';
 import {
   Alert,
   AlertDescription,
@@ -33,9 +33,11 @@ import {
   ModelListItem,
   ModelRef,
   ParentKeyResponse,
+  SecretsUpdate,
   claimParentKey,
   createAgent,
   deleteAgent,
+  discoverMcpTools,
   getAgent,
   getAgentModelPolicy,
   getMe,
@@ -150,7 +152,17 @@ function initialConfigFromAgent(agent: AgentDetail) {
     temperature: agent.temperature,
     tools: Array.isArray(agent.tools) ? agent.tools : [],
     behavior: agent.behavior,
+    mcp_servers: mcpServersFromYaml(agent.yaml),
   } as Record<string, unknown>;
+}
+
+function mcpServersFromYaml(yaml: string) {
+  try {
+    const servers = yamlToConfig(yaml).mcp_servers;
+    return Array.isArray(servers) ? servers : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function EmptyState({ title, children }: { title: string; children: React.ReactNode }) {
@@ -899,7 +911,7 @@ function AgentEditorPage({
     };
   }, [mode]);
 
-  async function submit(yaml: string) {
+  async function submit(yaml: string, secrets?: SecretsUpdate) {
     if (hasConflict) {
       setError('Default model is not in the allowed list. Fix the model policy before saving.');
       return;
@@ -913,11 +925,11 @@ function AgentEditorPage({
     try {
       const allowedModels = refsFromKeys(allowedKeys, modelOptions);
       if (mode === 'create') {
-        const created = await createAgent(yaml);
+        const created = await createAgent(yaml, secrets);
         await updateAgentModelPolicy(created.agent_id, defaultModel, allowedModels);
         onSubmitted(created.agent_id, created);
       } else if (agent) {
-        await updateAgent(agent.agent_id, yaml);
+        await updateAgent(agent.agent_id, yaml, secrets);
         await updateAgentModelPolicy(agent.agent_id, defaultModel, allowedModels);
         onSubmitted(agent.agent_id);
       }
@@ -1005,6 +1017,8 @@ function AgentEditorPage({
               schema={schema}
               initialConfig={initialConfig}
               showEditor
+              secretNames={agent?.secret_names}
+              onDiscoverTools={(server, secrets) => discoverMcpTools(server, secrets, agent?.agent_id)}
               onSubmit={submit}
             />
           </div>

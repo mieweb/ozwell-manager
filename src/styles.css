@@ -618,45 +618,6 @@ body {
   gap: 6px;
 }
 
-.agent-model-revert-btn {
-  padding: 3px 9px;
-  border: 1px solid var(--mieweb-border, #dce4ec);
-  border-radius: 5px;
-  background: transparent;
-  color: var(--mieweb-muted-foreground, #667386);
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-  transition: background 120ms;
-}
-
-.agent-model-revert-btn:hover {
-  background: var(--mieweb-muted, #f8fafc);
-  color: var(--mieweb-foreground, #172033);
-}
-
-.agent-model-save-btn {
-  padding: 3px 12px;
-  border: none;
-  border-radius: 5px;
-  background: var(--mieweb-primary, #0ea5e9);
-  color: #fff;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: opacity 120ms;
-}
-
-.agent-model-save-btn:hover:not(:disabled) {
-  opacity: 0.88;
-}
-
-.agent-model-save-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
 .agent-model-restriction-section {
   border-top: 1px solid var(--mieweb-border, #dce4ec);
   padding-top: 12px;

@@ -540,19 +540,20 @@ function ModelAccessControls({
         <span className="agent-model-controls-label">Model access</span>
         <div className="agent-model-controls-actions">
           {onReset && (
-            <button type="button" className="agent-model-revert-btn" onClick={onReset} disabled={disabled || savingPolicy}>
+            <Button variant="outline" size="sm" type="button" onClick={onReset} disabled={disabled || savingPolicy}>
               Revert
-            </button>
+            </Button>
           )}
           {onSave && (
-            <button
+            <Button
+              variant="primary"
+              size="sm"
               type="button"
-              className="agent-model-save-btn"
               onClick={onSave}
               disabled={disabled || savingPolicy || hasConflict}
             >
               {savingPolicy ? 'Saving…' : 'Save'}
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -970,13 +971,14 @@ function AgentEditorPage({
           {agent && <p className="subtle">{agent.agent_id}</p>}
         </div>
         <div className="button-row">
-          <Button variant="secondary" type="button" onClick={onBack} leftIcon={<ArrowLeft aria-hidden="true" size={16} />}>
+          <Button variant="outline" size="sm" type="button" onClick={onBack} leftIcon={<ArrowLeft aria-hidden="true" size={16} />}>
             Back to agents
           </Button>
           {agent && (
             <>
               <Button
-                variant="secondary"
+                variant="outline"
+                size="sm"
                 type="button"
                 onClick={() => onReveal(agent)}
                 leftIcon={<Eye aria-hidden="true" size={16} />}
@@ -984,14 +986,15 @@ function AgentEditorPage({
                 Reveal key
               </Button>
               <Button
-                variant="secondary"
+                variant="outline"
+                size="sm"
                 type="button"
                 onClick={() => onRotate(agent)}
                 leftIcon={<RotateCcw aria-hidden="true" size={16} />}
               >
                 Rotate key
               </Button>
-              <Button variant="danger" type="button" onClick={() => onDelete(agent)} leftIcon={<Trash2 aria-hidden="true" size={16} />}>
+              <Button variant="danger" size="sm" type="button" onClick={() => onDelete(agent)} leftIcon={<Trash2 aria-hidden="true" size={16} />}>
                 Delete
               </Button>
             </>

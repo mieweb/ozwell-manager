@@ -10,7 +10,7 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@mieweb/q": "^1.2.0",
+    "@mieweb/q": "^1.2.1",
     "@mieweb/ui": "^0.6.1",
     "@vitejs/plugin-react": "^4.7.0",
     "lucide-react": "^0.562.0",

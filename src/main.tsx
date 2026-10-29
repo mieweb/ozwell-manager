@@ -233,13 +233,14 @@ function AgentsPage({
         <div className="button-row">
           <Button
             variant="secondary"
+            size="sm"
             type="button"
             onClick={onRefresh}
             leftIcon={<RefreshCw aria-hidden="true" size={16} />}
           >
             Refresh
           </Button>
-          <Button variant="primary" type="button" onClick={onNew} leftIcon={<Plus aria-hidden="true" size={16} />}>
+          <Button variant="primary" size="sm" type="button" onClick={onNew} leftIcon={<Plus aria-hidden="true" size={16} />}>
             New agent
           </Button>
         </div>
@@ -369,6 +370,7 @@ function AgentsPage({
         <div className="button-row">
           <Button
             variant="secondary"
+            size="sm"
             type="button"
             onClick={onRevealParentKey}
             leftIcon={<KeyRound aria-hidden="true" size={16} />}
@@ -376,7 +378,7 @@ function AgentsPage({
           >
             Reveal / Copy Ozwell key
           </Button>
-          <Button variant="secondary" type="button" onClick={onClaimParentKey}>
+          <Button variant="secondary" size="sm" type="button" onClick={onClaimParentKey}>
             Claim existing Ozwell key
           </Button>
         </div>

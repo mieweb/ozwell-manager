@@ -540,7 +540,7 @@ function ModelAccessControls({
         <span className="agent-model-controls-label">Model access</span>
         <div className="agent-model-controls-actions">
           {onReset && (
-            <Button variant="outline" size="sm" type="button" onClick={onReset} disabled={disabled || savingPolicy}>
+            <Button variant="secondary" size="sm" type="button" onClick={onReset} disabled={disabled || savingPolicy}>
               Revert
             </Button>
           )}
@@ -971,13 +971,13 @@ function AgentEditorPage({
           {agent && <p className="subtle">{agent.agent_id}</p>}
         </div>
         <div className="button-row">
-          <Button variant="outline" size="sm" type="button" onClick={onBack} leftIcon={<ArrowLeft aria-hidden="true" size={16} />}>
+          <Button variant="secondary" size="sm" type="button" onClick={onBack} leftIcon={<ArrowLeft aria-hidden="true" size={16} />}>
             Back to agents
           </Button>
           {agent && (
             <>
               <Button
-                variant="outline"
+                variant="secondary"
                 size="sm"
                 type="button"
                 onClick={() => onReveal(agent)}
@@ -986,7 +986,7 @@ function AgentEditorPage({
                 Reveal key
               </Button>
               <Button
-                variant="outline"
+                variant="secondary"
                 size="sm"
                 type="button"
                 onClick={() => onRotate(agent)}

@@ -233,13 +233,14 @@ function AgentsPage({
         <div className="button-row">
           <Button
             variant="secondary"
+            size="sm"
             type="button"
             onClick={onRefresh}
             leftIcon={<RefreshCw aria-hidden="true" size={16} />}
           >
             Refresh
           </Button>
-          <Button variant="primary" type="button" onClick={onNew} leftIcon={<Plus aria-hidden="true" size={16} />}>
+          <Button variant="primary" size="sm" type="button" onClick={onNew} leftIcon={<Plus aria-hidden="true" size={16} />}>
             New agent
           </Button>
         </div>
@@ -369,6 +370,7 @@ function AgentsPage({
         <div className="button-row">
           <Button
             variant="secondary"
+            size="sm"
             type="button"
             onClick={onRevealParentKey}
             leftIcon={<KeyRound aria-hidden="true" size={16} />}
@@ -376,7 +378,7 @@ function AgentsPage({
           >
             Reveal / Copy Ozwell key
           </Button>
-          <Button variant="secondary" type="button" onClick={onClaimParentKey}>
+          <Button variant="secondary" size="sm" type="button" onClick={onClaimParentKey}>
             Claim existing Ozwell key
           </Button>
         </div>
@@ -540,19 +542,20 @@ function ModelAccessControls({
         <span className="agent-model-controls-label">Model access</span>
         <div className="agent-model-controls-actions">
           {onReset && (
-            <button type="button" className="agent-model-revert-btn" onClick={onReset} disabled={disabled || savingPolicy}>
+            <Button variant="secondary" size="sm" type="button" onClick={onReset} disabled={disabled || savingPolicy}>
               Revert
-            </button>
+            </Button>
           )}
           {onSave && (
-            <button
+            <Button
+              variant="primary"
+              size="sm"
               type="button"
-              className="agent-model-save-btn"
               onClick={onSave}
               disabled={disabled || savingPolicy || hasConflict}
             >
               {savingPolicy ? 'Saving…' : 'Save'}
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -970,13 +973,14 @@ function AgentEditorPage({
           {agent && <p className="subtle">{agent.agent_id}</p>}
         </div>
         <div className="button-row">
-          <Button variant="secondary" type="button" onClick={onBack} leftIcon={<ArrowLeft aria-hidden="true" size={16} />}>
+          <Button variant="secondary" size="sm" type="button" onClick={onBack} leftIcon={<ArrowLeft aria-hidden="true" size={16} />}>
             Back to agents
           </Button>
           {agent && (
             <>
               <Button
                 variant="secondary"
+                size="sm"
                 type="button"
                 onClick={() => onReveal(agent)}
                 leftIcon={<Eye aria-hidden="true" size={16} />}
@@ -985,13 +989,14 @@ function AgentEditorPage({
               </Button>
               <Button
                 variant="secondary"
+                size="sm"
                 type="button"
                 onClick={() => onRotate(agent)}
                 leftIcon={<RotateCcw aria-hidden="true" size={16} />}
               >
                 Rotate key
               </Button>
-              <Button variant="danger" type="button" onClick={() => onDelete(agent)} leftIcon={<Trash2 aria-hidden="true" size={16} />}>
+              <Button variant="danger" size="sm" type="button" onClick={() => onDelete(agent)} leftIcon={<Trash2 aria-hidden="true" size={16} />}>
                 Delete
               </Button>
             </>

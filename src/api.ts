@@ -269,7 +269,9 @@ function errorMessage(payload: unknown, fallback: string) {
     if (error?.code === 'destination_parent_key_not_found') return 'Destination user has no active Ozwell key.';
     if (error?.code === 'agent_already_owned_by_destination') return 'Agent is already owned by that user.';
     if (error?.code === 'agent_not_found') return 'Agent is missing or inaccessible.';
-    if (error?.code === 'mcp_discovery_failed') return `MCP tool discovery failed: ${error.message || 'server unreachable'}`;
+    if (error?.code === 'mcp_discovery_failed') {
+      return `MCP tool discovery failed: ${error.message || 'server unreachable'}. Check that the URL is reachable from the Ozwell server and the credential is valid.`;
+    }
     if (error?.code === 'missing_secrets') return `${error.message || 'Missing MCP server credentials.'} Enter the credential and save again.`;
     if (error?.message) return error.message;
   }

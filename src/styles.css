@@ -465,6 +465,13 @@ body {
   background: var(--mieweb-card, #ffffff);
 }
 
+/* Excludes Monaco's hidden IME textarea in the Config Editor tab. */
+.q-editor-frame textarea:not(.ime-text-area) {
+  min-height: 6rem;
+  field-sizing: content;
+  max-height: 24rem;
+}
+
 @media (max-width: 900px) {
   .editor-body {
     grid-template-columns: 1fr;
@@ -751,6 +758,7 @@ body {
 .effective-models > div {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 5px;
   min-width: 0;
 }
@@ -1955,12 +1963,19 @@ body {
   background: var(--mieweb-muted, #f8fafc);
 }
 
-.effective-models span {
+.effective-models > span {
   color: var(--mieweb-muted-foreground, #667386);
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.09em;
   text-transform: uppercase;
+}
+
+.effective-models-provider {
+  color: var(--mieweb-muted-foreground, #667386);
+  font-size: 11px;
+  font-weight: 600;
+  margin-right: 2px;
 }
 
 .effective-models strong {

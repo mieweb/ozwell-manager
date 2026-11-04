@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { StrictMode, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AgentConfigGenerator, yamlToConfig } from '@mieweb/q';
 import {
@@ -847,6 +847,7 @@ function AgentEditorPage({
   schema,
   models,
   onBack,
+  onDirtyChange,
   onSubmitted,
   onModelPolicySaved,
   onReveal,
@@ -858,6 +859,7 @@ function AgentEditorPage({
   schema: Record<string, unknown>;
   models: ModelListItem[];
   onBack: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
   onSubmitted: (agentId: string, key?: KeyResponse) => void;
   onModelPolicySaved?: () => Promise<void>;
   onReveal: (agent: AgentDetail) => void;
@@ -882,13 +884,16 @@ function AgentEditorPage({
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [configDirty, setConfigDirty] = useState(false);
   const configBaseline = useRef<string | null>(null);
+  const latestConfig = useRef<string | null>(null);
+  const [policyBaseline, setPolicyBaseline] = useState<{ keys: Set<string>; restricted: boolean; fallback: string } | null>(null);
 
   const hasConflict = conflictExists(allowedKeys, defaultModel);
   const emptyRestriction = restricted && allowedKeys.size === 0;
   const policyDirty =
-    mode === 'edit' && !!policy &&
-    (!sameKeys(allowedKeys, refsToKeys(policy.allowed_models)) ||
-      restricted !== policy.allowed_models.length > 0);
+    !!policyBaseline &&
+    (!sameKeys(allowedKeys, policyBaseline.keys) ||
+      restricted !== policyBaseline.restricted ||
+      (defaultModel ? selectionKey(defaultModel) : '') !== policyBaseline.fallback);
   const dirty = configDirty || policyDirty;
 
   function loadAllowed(refs: ModelRef[]) {
@@ -896,12 +901,30 @@ function AgentEditorPage({
     setRestricted(refs.length > 0);
   }
 
+  function applyPolicy(fallback: ModelRef | null, refs: ModelRef[]) {
+    setDefaultModel(fallback);
+    loadAllowed(refs);
+    setPolicyBaseline({ keys: refsToKeys(refs), restricted: refs.length > 0, fallback: fallback ? selectionKey(fallback) : '' });
+  }
+
   function handleConfigChange(config: Record<string, unknown>) {
     const serialized = JSON.stringify(config);
+    latestConfig.current = serialized;
     // The generator emits its initial config on mount; treat that as the baseline.
     if (configBaseline.current === null) configBaseline.current = serialized;
     setConfigDirty(serialized !== configBaseline.current);
   }
+
+  function markConfigSaved(submitted: string | null) {
+    configBaseline.current = submitted;
+    setConfigDirty(latestConfig.current !== submitted);
+  }
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
   useEffect(() => {
     if (!dirty) return undefined;
@@ -924,11 +947,15 @@ function AgentEditorPage({
   useEffect(() => {
     let active = true;
     setPolicy(null);
-    loadAllowed([]);
-    setDefaultModel(fallbackDefault);
     setPolicyWarning('');
     setPolicySuccess('');
-    if (mode === 'create' || !agent) return undefined;
+    if (mode === 'create' || !agent) {
+      applyPolicy(fallbackDefault, []);
+      return undefined;
+    }
+    loadAllowed([]);
+    setDefaultModel(fallbackDefault);
+    setPolicyBaseline(null);
 
     setPolicyLoading(true);
     getAgentModelPolicy(agent.agent_id)
@@ -936,9 +963,8 @@ function AgentEditorPage({
         if (!active) return;
         setPolicy(payload);
         const normalized = normalizeDefaultModel(payload.default_model, payload.effective_models, fallbackDefault);
-        setDefaultModel(normalized.model);
+        applyPolicy(normalized.model, payload.allowed_models);
         setPolicyWarning(normalized.changed ? 'Previous fallback model is no longer available. Choose and save a new fallback.' : '');
-        loadAllowed(payload.allowed_models);
       })
       .catch((err) => {
         if (!active) return;
@@ -969,7 +995,7 @@ function AgentEditorPage({
       .then((nextModels) => {
         if (!active) return;
         setCreateModels(nextModels);
-        setDefaultModel(firstModelRef(nextModels));
+        applyPolicy(firstModelRef(nextModels), []);
       })
       .catch((err) => {
         if (!active) return;
@@ -999,17 +1025,18 @@ function AgentEditorPage({
     }
     setSaving(true);
     setError('');
+    const submittedConfig = latestConfig.current;
     try {
       const allowedModels = refsFromKeys(allowedKeys, modelOptions);
       if (mode === 'create') {
         const created = await createAgent(yaml, secrets);
         await updateAgentModelPolicy(created.agent_id, defaultModel, allowedModels);
-        setConfigDirty(false);
+        markConfigSaved(submittedConfig);
         onSubmitted(created.agent_id, created);
       } else if (agent) {
         await updateAgent(agent.agent_id, yaml, secrets);
         await updateAgentModelPolicy(agent.agent_id, defaultModel, allowedModels);
-        setConfigDirty(false);
+        markConfigSaved(submittedConfig);
         onSubmitted(agent.agent_id);
       }
     } catch (err) {
@@ -1028,8 +1055,7 @@ function AgentEditorPage({
       const saved = await updateAgentModelPolicy(agent.agent_id, defaultModel, refsFromKeys(allowedKeys, modelOptions));
       setPolicy(saved);
       const normalized = normalizeDefaultModel(saved.default_model, saved.effective_models, defaultModel);
-      setDefaultModel(normalized.model);
-      loadAllowed(saved.allowed_models);
+      applyPolicy(normalized.model, saved.allowed_models);
       setPolicyWarning('');
       setPolicySuccess('Provider and model settings updated.');
       await onModelPolicySaved?.();
@@ -1526,6 +1552,17 @@ function App() {
   const [keyDialog, setKeyDialog] = useState<{ mode: KeyMode; agent: Pick<AgentDetail, 'agent_id' | 'name'> } | null>(null);
   const [modelPolicyDialogAgent, setModelPolicyDialogAgent] = useState<Pick<AgentListItem, 'id' | 'name' | 'provider' | 'model' | 'default_model'> | null>(null);
   const [parentKeyDialog, setParentKeyDialog] = useState<ParentKeyDialogMode | null>(null);
+  const editorDirty = useRef(false);
+  const handleEditorDirtyChange = useCallback((dirty: boolean) => {
+    editorDirty.current = dirty;
+  }, []);
+
+  function confirmLeaveEditor() {
+    if (!editorDirty.current) return true;
+    if (!window.confirm('You have unsaved changes. Leave without saving?')) return false;
+    editorDirty.current = false;
+    return true;
+  }
 
   async function refreshAgents() {
     setAgentsLoading(true);
@@ -1598,6 +1635,7 @@ function App() {
   }
 
   function openAdmin() {
+    if (!confirmLeaveEditor()) return;
     window.history.pushState(null, '', '/admin');
     setSelectedAgent(null);
     setPage('admin');
@@ -1651,6 +1689,11 @@ function App() {
 
   useEffect(() => {
     function syncPageFromPath() {
+      if (!confirmLeaveEditor()) {
+        // The editor has no URL of its own; restore the entry the user navigated away from.
+        window.history.pushState(null, '', '/');
+        return;
+      }
       if (window.location.pathname === '/admin') setPage('admin');
       else setPage('agents');
     }
@@ -1756,6 +1799,7 @@ function App() {
             setPage('agents');
             setSelectedAgent(null);
           }}
+          onDirtyChange={handleEditorDirtyChange}
           onSubmitted={onSubmitted}
           onModelPolicySaved={refreshAgents}
           onReveal={(agent) => setKeyDialog({ mode: 'reveal', agent })}

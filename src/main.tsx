@@ -472,6 +472,10 @@ function ModelAccessControls({
 }) {
   const [filterQuery, setFilterQuery] = useState('');
   const [touchedProviders, setTouchedProviders] = useState<Set<string>>(new Set());
+  const lastSpecificKeys = useRef<Set<string>>(allowedKeys);
+  useEffect(() => {
+    if (allowedKeys.size) lastSpecificKeys.current = allowedKeys;
+  }, [allowedKeys]);
   const groupedModels = useMemo(() => groupModelsByProvider(models), [models]);
   const providerNames = useMemo(() => Object.keys(groupedModels).sort(), [groupedModels]);
   const selectedProvider = defaultModel?.provider && groupedModels[defaultModel.provider] ? defaultModel.provider : providerNames[0] || '';
@@ -502,8 +506,19 @@ function ModelAccessControls({
   }
 
   function setAnyModel() {
+    if (allowedKeys.size) lastSpecificKeys.current = allowedKeys;
     onRestrictedChange(false);
     onAllowedKeysChange(new Set());
+  }
+
+  function setSpecificModels() {
+    if (restricted) return;
+    onRestrictedChange(true);
+    if (lastSpecificKeys.current.size) {
+      onAllowedKeysChange(new Set(lastSpecificKeys.current));
+    } else if (defaultModel?.provider && defaultModel.model) {
+      onAllowedKeysChange(new Set([modelKey(defaultModel)]));
+    }
   }
 
   function providerSelected(provider: string) {
@@ -612,7 +627,7 @@ function ModelAccessControls({
           <button
             type="button"
             className={`agent-model-mode-btn${restricted ? ' active' : ''}`}
-            onClick={() => onRestrictedChange(true)}
+            onClick={setSpecificModels}
             disabled={disabled}
           >
             Specific models

@@ -435,6 +435,39 @@ function sameKeys(a: Set<string>, b: Set<string>) {
   return a.size === b.size && [...a].every((key) => b.has(key));
 }
 
+type CopyState = 'idle' | 'copied' | 'failed';
+
+function copyLabel(state: CopyState) {
+  return state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed' : 'Copy key';
+}
+
+function useCopyFeedback() {
+  const [copyState, setCopyState] = useState<CopyState>('idle');
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  async function copyText(text: string) {
+    let next: CopyState = 'copied';
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      next = 'failed';
+    }
+    setCopyState(next);
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setCopyState('idle'), 1800);
+  }
+
+  return { copyState, copyText };
+}
+
+// Everything the current user's Ozwell key may use; an agent can pick from any of these.
+async function loadAvailableModels() {
+  const payload = await revealParentKey();
+  const parentKey = payload.parent_key || payload.key;
+  return parentKey ? listEffectiveModels(parentKey) : [];
+}
+
 function conflictExists(allowedKeys: Set<string>, defaultModel: ModelRef | null) {
   if (!allowedKeys.size) return false;
   if (!defaultModel?.provider || !defaultModel.model) return false;
@@ -750,11 +783,14 @@ function AgentModelPolicyDialog({
   const [warning, setWarning] = useState('');
   const [success, setSuccess] = useState('');
   const fallbackDefault = useMemo(() => legacyModelRef(agent, models), [agent, models]);
+  const fallbackRef = useRef(fallbackDefault);
+  fallbackRef.current = fallbackDefault;
   const [defaultModel, setDefaultModel] = useState<ModelRef | null>(fallbackDefault);
   const [allowedKeys, setAllowedKeys] = useState<Set<string>>(new Set());
   const [restricted, setRestricted] = useState(false);
   const [policy, setPolicy] = useState<AgentModelPolicyResponse | null>(null);
-  const modelOptions = policy ? policy.effective_models : [];
+  const [availableModels, setAvailableModels] = useState<ModelListItem[]>([]);
+  const modelOptions = availableModels.length ? availableModels : policy ? policy.effective_models : [];
   const hasConflict = conflictExists(allowedKeys, defaultModel);
   const emptyRestriction = restricted && allowedKeys.size === 0;
 
@@ -766,11 +802,12 @@ function AgentModelPolicyDialog({
   useEffect(() => {
     let active = true;
     setState('loading');
-    getAgentModelPolicy(agent.id)
-      .then((payload) => {
+    Promise.all([getAgentModelPolicy(agent.id), loadAvailableModels()])
+      .then(([payload, available]) => {
         if (!active) return;
         setPolicy(payload);
-        const normalized = normalizeDefaultModel(payload.default_model, payload.effective_models, fallbackDefault);
+        setAvailableModels(available);
+        const normalized = normalizeDefaultModel(payload.default_model, payload.effective_models, fallbackRef.current);
         setDefaultModel(normalized.model);
         setWarning(normalized.changed ? 'Previous fallback model is no longer available. Choose and save a new fallback.' : '');
         loadAllowed(payload.allowed_models);
@@ -784,7 +821,7 @@ function AgentModelPolicyDialog({
     return () => {
       active = false;
     };
-  }, [agent.id, fallbackDefault]);
+  }, [agent.id]);
 
   function resetPolicy() {
     const normalized = normalizeDefaultModel(policy?.default_model || null, policy?.effective_models || [], fallbackDefault);
@@ -875,7 +912,7 @@ function AgentEditorPage({
   models: ModelListItem[];
   onBack: () => void;
   onDirtyChange?: (dirty: boolean) => void;
-  onSubmitted: (agentId: string, key?: KeyResponse) => void;
+  onSubmitted: (agentId: string, key?: KeyResponse) => Promise<void>;
   onModelPolicySaved?: () => Promise<void>;
   onReveal: (agent: AgentDetail) => void;
   onRotate: (agent: AgentDetail) => void;
@@ -887,11 +924,15 @@ function AgentEditorPage({
   const [policySuccess, setPolicySuccess] = useState('');
   const [policyLoading, setPolicyLoading] = useState(false);
   const [policy, setPolicy] = useState<AgentModelPolicyResponse | null>(null);
-  const [createModels, setCreateModels] = useState<ModelListItem[]>([]);
-  const modelOptions = mode === 'create' ? createModels : policy ? policy.effective_models : [];
-  const createFallback = useMemo(() => firstModelRef(createModels), [createModels]);
+  const [availableModels, setAvailableModels] = useState<ModelListItem[]>([]);
+  // The agent policy's effective_models is already narrowed to this agent, so it can't be the pick list.
+  const modelOptions = availableModels.length ? availableModels : policy ? policy.effective_models : [];
+  const createFallback = useMemo(() => firstModelRef(availableModels), [availableModels]);
   const editFallback = useMemo(() => legacyModelRef(agent, models), [agent, models]);
   const fallbackDefault = mode === 'create' ? createFallback : editFallback;
+  // Read through a ref: a refreshed model list must not refetch the policy and wipe unsaved edits.
+  const fallbackRef = useRef(fallbackDefault);
+  fallbackRef.current = fallbackDefault;
   const [defaultModel, setDefaultModel] = useState<ModelRef | null>(fallbackDefault);
   const [allowedKeys, setAllowedKeys] = useState<Set<string>>(new Set());
   const [restricted, setRestricted] = useState(false);
@@ -965,11 +1006,11 @@ function AgentEditorPage({
     setPolicyWarning('');
     setPolicySuccess('');
     if (mode === 'create' || !agent) {
-      applyPolicy(fallbackDefault, []);
+      applyPolicy(fallbackRef.current, []);
       return undefined;
     }
     loadAllowed([]);
-    setDefaultModel(fallbackDefault);
+    setDefaultModel(fallbackRef.current);
     setPolicyBaseline(null);
 
     setPolicyLoading(true);
@@ -977,7 +1018,7 @@ function AgentEditorPage({
       .then((payload) => {
         if (!active) return;
         setPolicy(payload);
-        const normalized = normalizeDefaultModel(payload.default_model, payload.effective_models, fallbackDefault);
+        const normalized = normalizeDefaultModel(payload.default_model, payload.effective_models, fallbackRef.current);
         applyPolicy(normalized.model, payload.allowed_models);
         setPolicyWarning(normalized.changed ? 'Previous fallback model is no longer available. Choose and save a new fallback.' : '');
       })
@@ -991,33 +1032,25 @@ function AgentEditorPage({
     return () => {
       active = false;
     };
-  }, [agent, mode, fallbackDefault]);
+  }, [agent, mode]);
 
   useEffect(() => {
     let active = true;
-    if (mode !== 'create') {
-      setCreateModels([]);
-      return undefined;
-    }
-
-    setPolicyLoading(true);
+    setAvailableModels([]);
+    if (mode === 'create') setPolicyLoading(true);
     setError('');
-    revealParentKey()
-      .then((payload) => {
-        const parentKey = payload.parent_key || payload.key;
-        return parentKey ? listEffectiveModels(parentKey) : [];
-      })
+    loadAvailableModels()
       .then((nextModels) => {
         if (!active) return;
-        setCreateModels(nextModels);
-        applyPolicy(firstModelRef(nextModels), []);
+        setAvailableModels(nextModels);
+        if (mode === 'create') applyPolicy(firstModelRef(nextModels), []);
       })
       .catch((err) => {
         if (!active) return;
         setError(err instanceof Error ? err.message : 'Unable to load effective models.');
       })
       .finally(() => {
-        if (active) setPolicyLoading(false);
+        if (active && mode === 'create') setPolicyLoading(false);
       });
 
     return () => {
@@ -1047,12 +1080,12 @@ function AgentEditorPage({
         const created = await createAgent(yaml, secrets);
         await updateAgentModelPolicy(created.agent_id, defaultModel, allowedModels);
         markConfigSaved(submittedConfig);
-        onSubmitted(created.agent_id, created);
+        await onSubmitted(created.agent_id, created);
       } else if (agent) {
         await updateAgent(agent.agent_id, yaml, secrets);
         await updateAgentModelPolicy(agent.agent_id, defaultModel, allowedModels);
         markConfigSaved(submittedConfig);
-        onSubmitted(agent.agent_id);
+        await onSubmitted(agent.agent_id);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed.');
@@ -1338,7 +1371,7 @@ function KeyDialog({
 }) {
   const [state, setState] = useState<LoadState>(mode === 'saved' ? 'ready' : 'loading');
   const [result, setResult] = useState<KeyResponse | null>(null);
-  const [copied, setCopied] = useState(false);
+  const { copyState, copyText } = useCopyFeedback();
   const [error, setError] = useState('');
   const operation = useRef<Promise<KeyResponse> | null>(null);
   const handledOperation = useRef(false);
@@ -1378,9 +1411,7 @@ function KeyDialog({
 
   async function copy() {
     if (!result?.agent_key) return;
-    await navigator.clipboard.writeText(result.agent_key);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1800);
+    await copyText(result.agent_key);
   }
 
   return (
@@ -1407,7 +1438,7 @@ function KeyDialog({
       <ModalFooter>
         {state === 'ready' && result && (
           <Button variant="primary" type="button" onClick={copy} leftIcon={<Copy aria-hidden="true" size={16} />}>
-            {copied ? 'Copied' : 'Copy key'}
+            {copyLabel(copyState)}
           </Button>
         )}
         <Button variant="secondary" type="button" onClick={onClose}>
@@ -1421,7 +1452,7 @@ function KeyDialog({
 function ParentKeyRevealDialog({ onClose }: { onClose: () => void }) {
   const [state, setState] = useState<LoadState>('loading');
   const [result, setResult] = useState<ParentKeyResponse | null>(null);
-  const [copied, setCopied] = useState(false);
+  const { copyState, copyText } = useCopyFeedback();
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -1446,9 +1477,7 @@ function ParentKeyRevealDialog({ onClose }: { onClose: () => void }) {
 
   async function copy() {
     if (!parentKey) return;
-    await navigator.clipboard.writeText(parentKey);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1800);
+    await copyText(parentKey);
   }
 
   return (
@@ -1472,7 +1501,7 @@ function ParentKeyRevealDialog({ onClose }: { onClose: () => void }) {
       <ModalFooter>
         {state === 'ready' && parentKey && (
           <Button variant="primary" type="button" onClick={copy} leftIcon={<Copy aria-hidden="true" size={16} />}>
-            {copied ? 'Copied' : 'Copy key'}
+            {copyLabel(copyState)}
           </Button>
         )}
         <Button variant="secondary" type="button" onClick={onClose}>
@@ -1687,15 +1716,15 @@ function App() {
   }
 
   async function onSubmitted(agentId: string, key?: KeyResponse) {
+    setKeyDialog({ mode: key ? 'created' : 'saved', agent: { agent_id: agentId, name: selectedAgent?.name || 'New agent' } });
     await refreshAgents();
     const detail = await getAgent(agentId);
     setSelectedAgent(detail);
     setEditorMode('edit');
     setPage('editor');
-    setKeyDialog({
-      mode: key ? 'created' : 'saved',
-      agent: { agent_id: agentId, name: detail.name || 'New agent' },
-    });
+    setKeyDialog((current) =>
+      current?.agent.agent_id === agentId ? { ...current, agent: { agent_id: agentId, name: detail.name || 'New agent' } } : current,
+    );
   }
 
   useEffect(() => {

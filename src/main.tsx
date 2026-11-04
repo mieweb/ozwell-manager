@@ -1722,6 +1722,9 @@ function App() {
     setSelectedAgent(detail);
     setEditorMode('edit');
     setPage('editor');
+    setKeyDialog((current) =>
+      current?.agent.agent_id === agentId ? { ...current, agent: { agent_id: agentId, name: detail.name || 'New agent' } } : current,
+    );
   }
 
   useEffect(() => {

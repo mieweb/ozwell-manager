@@ -2,26 +2,26 @@
 
 ## Required Local Services
 
-Run the backend from the `ozwellai-api` repository on branch `codex/manager-auth-backend`.
+Run the backend from the [`ozwellai-api`](https://github.com/mieweb/ozwellai-api) repository on branch `main`. The commands below assume both repositories are cloned side by side.
 
 Backend API:
 
 ```bash
-cd /Users/adityadamerla/GitHub/ozwellai-api
+cd ../ozwellai-api
 npm run dev
 ```
 
 Local manager auth proxy:
 
 ```bash
-cd /Users/adityadamerla/GitHub/ozwellai-api
+cd ../ozwellai-api
 node scripts/dev/manager-auth-proxy.js
 ```
 
 Frontend:
 
 ```bash
-cd /Users/adityadamerla/GitHub/ozwell-manager
+cd ../ozwell-manager
 npm run dev -- --port 5174
 ```
 
@@ -81,6 +81,32 @@ When a key claim succeeds, refresh:
 - `GET /v1/manager/agents`
 
 Handle `409 parent_key_already_claimed` with a clear user-facing message.
+
+## Release Process
+
+Deployments run from `.github/workflows/deploy.yml`.
+
+| Environment | Trigger | Website |
+|---|---|---|
+| `dev` | Push/merge to `dev` | https://ozwellconsole.os.mieweb.org |
+| `production` | Push a `v*` tag on a `main` commit | https://ozwellmanager.os.mieweb.org |
+
+Release to production (preferred): **Actions → Deploy → Run workflow** on `main`, pick `patch` / `minor` / `major`. It bumps `package.json`, pushes the `vX.Y.Z` tag, creates a GitHub Release, and deploys.
+
+Or tag manually:
+
+```bash
+git switch main && git pull
+git tag -a v0.2.0 -m "Release v0.2.0"
+git push origin v0.2.0
+```
+
+Each deploy SSHes to the server, checks out the commit in `~/ozwell-manager`, runs `npm ci && npm run build`, and restarts the `ozwell-manager` PM2 process. Server env (`PORT`, `OZWELL_BACKEND_URL`) stays in PM2 on the host.
+
+Each GitHub environment (`dev`, `production`) needs:
+
+- Secrets: `DEPLOY_SSH_KEY` (private key), `DEPLOY_SSH_KNOWN_HOSTS` (`ssh-keyscan -p <port> <host>` output)
+- Variables: `DEPLOY_SSH_HOST`, `DEPLOY_SSH_PORT`, `DEPLOY_SSH_USER`; optional `DEPLOY_APP_DIR`, `DEPLOY_PM2_APP`
 
 ## Private Local Notes
 

@@ -133,8 +133,8 @@ jobs:
           git fetch --tags --force origin
           git checkout --force --detach "$sha"
           npm ci
-          # dist is a symlink to releases/<sha>, swapped atomically so the live server never sees it missing.
-          release_dir="releases/$sha"
+          # dist is a symlink to a per-attempt release dir, swapped atomically so the live site is never touched mid-build.
+          release_dir="releases/$sha-$(date +%Y%m%d%H%M%S)"
           npx tsc
           npx vite build --outDir "$release_dir" --emptyOutDir
           ln -sfn "$release_dir" dist.next

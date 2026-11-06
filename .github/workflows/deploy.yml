@@ -133,15 +133,21 @@ jobs:
           git fetch --tags --force origin
           git checkout --force --detach "$sha"
           npm ci
-          # Build beside the live dist/ and swap only on success; dist.prev keeps the last release.
-          rm -rf dist.next
+          # dist is a symlink to releases/<sha>, swapped atomically so the live server never sees it missing.
+          release_dir="releases/$sha"
           npx tsc
-          npx vite build --outDir dist.next --emptyOutDir
-          rm -rf dist.prev
-          if [ -d dist ]; then mv dist dist.prev; fi
-          mv dist.next dist
+          npx vite build --outDir "$release_dir" --emptyOutDir
+          ln -sfn "$release_dir" dist.next
+          if [ -d dist ] && [ ! -L dist ]; then
+            # One-time migration from a plain dist/ directory.
+            pm2 stop "$pm2_app"
+            rm -rf dist.legacy
+            mv dist dist.legacy
+          fi
+          mv -T dist.next dist
           pm2 restart "$pm2_app"
           pm2 save
+          ls -1dt releases/*/ | tail -n +4 | xargs -r rm -rf
           git log -1 --oneline
           EOF
 

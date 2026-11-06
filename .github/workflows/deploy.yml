@@ -1,0 +1,85 @@
+name: Deploy
+
+on:
+  push:
+    branches: [dev]
+    tags: ['v*']
+
+concurrency:
+  group: deploy-${{ startsWith(github.ref, 'refs/tags/') && 'production' || 'dev' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure release tag points to a commit on main
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+            || { echo "::error::Tag ${GITHUB_REF_NAME} is not on main"; exit 1; }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ startsWith(github.ref, 'refs/tags/') && 'production' || 'dev' }}
+      url: ${{ startsWith(github.ref, 'refs/tags/') && 'https://ozwellmanager.os.mieweb.org' || 'https://ozwellconsole.os.mieweb.org' }}
+    steps:
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Deploy ${{ github.ref_name }} (${{ github.sha }})
+        env:
+          SSH_HOST: ${{ vars.DEPLOY_SSH_HOST }}
+          SSH_PORT: ${{ vars.DEPLOY_SSH_PORT }}
+          SSH_USER: ${{ vars.DEPLOY_SSH_USER }}
+          APP_DIR: ${{ vars.DEPLOY_APP_DIR || '~/ozwell-manager' }}
+          PM2_APP: ${{ vars.DEPLOY_PM2_APP || 'ozwell-manager' }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" bash -s -- "$APP_DIR" "$GITHUB_SHA" "$PM2_APP" <<'EOF'
+          set -euo pipefail
+          app_dir="${1/#\~/$HOME}"; sha="$2"; pm2_app="$3"
+          cd "$app_dir"
+          git fetch --tags --force origin
+          git checkout --force --detach "$sha"
+          npm ci
+          npm run build
+          pm2 restart "$pm2_app"
+          pm2 save
+          git log -1 --oneline
+          EOF
+
+      - name: Health check
+        env:
+          URL: ${{ startsWith(github.ref, 'refs/tags/') && 'https://ozwellmanager.os.mieweb.org' || 'https://ozwellconsole.os.mieweb.org' }}
+        run: |
+          for i in $(seq 1 10); do
+            curl -fsS -o /dev/null "$URL/" && { echo "OK: $URL"; exit 0; }
+            sleep 3
+          done
+          echo "::error::Health check failed for $URL"; exit 1

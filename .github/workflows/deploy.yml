@@ -42,8 +42,10 @@ jobs:
           echo "::error::Releases must be run from main"
           exit 1
 
+      # Use the current tip of main so a queued release builds on the previous one.
       - uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
@@ -122,15 +124,22 @@ jobs:
           APP_DIR: ${{ vars.DEPLOY_APP_DIR || '~/ozwell-manager' }}
           PM2_APP: ${{ vars.DEPLOY_PM2_APP || 'ozwell-manager' }}
         run: |
+          remote_args=$(printf '%q ' "$APP_DIR" "$SHA" "$PM2_APP")
           ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" -o StrictHostKeyChecking=yes \
-            "$SSH_USER@$SSH_HOST" bash -s -- "$APP_DIR" "$SHA" "$PM2_APP" <<'EOF'
+            "$SSH_USER@$SSH_HOST" "bash -s -- $remote_args" <<'EOF'
           set -euo pipefail
           app_dir="${1/#\~/$HOME}"; sha="$2"; pm2_app="$3"
           cd "$app_dir"
           git fetch --tags --force origin
           git checkout --force --detach "$sha"
           npm ci
-          npm run build
+          # Build beside the live dist/ and swap only on success; dist.prev keeps the last release.
+          rm -rf dist.next
+          npx tsc
+          npx vite build --outDir dist.next --emptyOutDir
+          rm -rf dist.prev
+          if [ -d dist ]; then mv dist dist.prev; fi
+          mv dist.next dist
           pm2 restart "$pm2_app"
           pm2 save
           git log -1 --oneline
@@ -139,7 +148,7 @@ jobs:
       - name: Health check
         run: |
           for i in $(seq 1 10); do
-            curl -fsS -o /dev/null "$SITE_URL/" && { echo "OK: $SITE_URL"; exit 0; }
+            curl -fsS --connect-timeout 5 --max-time 15 -o /dev/null "$SITE_URL/" && { echo "OK: $SITE_URL"; exit 0; }
             sleep 3
           done
           echo "::error::Health check failed for $SITE_URL"; exit 1

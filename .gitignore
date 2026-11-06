@@ -7,3 +7,5 @@ dist/
 .playwright-mcp/
 *.png
 !public/favicon.png
+dist.next/
+dist.prev/

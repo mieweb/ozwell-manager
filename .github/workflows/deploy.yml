@@ -4,21 +4,81 @@ on:
   push:
     branches: [dev]
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Semver bump level for the production release'
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 concurrency:
-  group: deploy-${{ startsWith(github.ref, 'refs/tags/') && 'production' || 'dev' }}
+  group: deploy-${{ github.ref == 'refs/heads/dev' && 'dev' || 'production' }}
   cancel-in-progress: false
 
 permissions:
   contents: read
 
+env:
+  TARGET: ${{ github.ref == 'refs/heads/dev' && 'dev' || 'production' }}
+  SITE_URL: ${{ github.ref == 'refs/heads/dev' && 'https://ozwellconsole.os.mieweb.org' || 'https://ozwellmanager.os.mieweb.org' }}
+
 jobs:
-  build:
+  release:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.bump.outputs.sha }}
     steps:
+      - name: Require main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Releases must be run from main"
+          exit 1
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Bump version, tag and push
+        id: bump
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          npm version ${{ inputs.bump }} -m "Release v%s"
+          git push origin HEAD:main --follow-tags
+          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "v${{ steps.bump.outputs.version }}" --generate-notes
+
+  build:
+    needs: release
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.sha || github.sha }}
+          fetch-depth: 0
+
+      - id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Ensure release tag points to a commit on main
         if: startsWith(github.ref, 'refs/tags/')
@@ -37,10 +97,11 @@ jobs:
 
   deploy:
     needs: build
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     environment:
-      name: ${{ startsWith(github.ref, 'refs/tags/') && 'production' || 'dev' }}
-      url: ${{ startsWith(github.ref, 'refs/tags/') && 'https://ozwellmanager.os.mieweb.org' || 'https://ozwellconsole.os.mieweb.org' }}
+      name: ${{ github.ref == 'refs/heads/dev' && 'dev' || 'production' }}
+      url: ${{ github.ref == 'refs/heads/dev' && 'https://ozwellconsole.os.mieweb.org' || 'https://ozwellmanager.os.mieweb.org' }}
     steps:
       - name: Configure SSH
         env:
@@ -52,8 +113,9 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
 
-      - name: Deploy ${{ github.ref_name }} (${{ github.sha }})
+      - name: Deploy ${{ needs.build.outputs.sha }} to ${{ env.TARGET }}
         env:
+          SHA: ${{ needs.build.outputs.sha }}
           SSH_HOST: ${{ vars.DEPLOY_SSH_HOST }}
           SSH_PORT: ${{ vars.DEPLOY_SSH_PORT }}
           SSH_USER: ${{ vars.DEPLOY_SSH_USER }}
@@ -61,7 +123,7 @@ jobs:
           PM2_APP: ${{ vars.DEPLOY_PM2_APP || 'ozwell-manager' }}
         run: |
           ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" -o StrictHostKeyChecking=yes \
-            "$SSH_USER@$SSH_HOST" bash -s -- "$APP_DIR" "$GITHUB_SHA" "$PM2_APP" <<'EOF'
+            "$SSH_USER@$SSH_HOST" bash -s -- "$APP_DIR" "$SHA" "$PM2_APP" <<'EOF'
           set -euo pipefail
           app_dir="${1/#\~/$HOME}"; sha="$2"; pm2_app="$3"
           cd "$app_dir"
@@ -75,11 +137,9 @@ jobs:
           EOF
 
       - name: Health check
-        env:
-          URL: ${{ startsWith(github.ref, 'refs/tags/') && 'https://ozwellmanager.os.mieweb.org' || 'https://ozwellconsole.os.mieweb.org' }}
         run: |
           for i in $(seq 1 10); do
-            curl -fsS -o /dev/null "$URL/" && { echo "OK: $URL"; exit 0; }
+            curl -fsS -o /dev/null "$SITE_URL/" && { echo "OK: $SITE_URL"; exit 0; }
             sleep 3
           done
-          echo "::error::Health check failed for $URL"; exit 1
+          echo "::error::Health check failed for $SITE_URL"; exit 1

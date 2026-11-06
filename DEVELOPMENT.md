@@ -91,7 +91,9 @@ Deployments run from `.github/workflows/deploy.yml`.
 | `dev` | Push/merge to `dev` | https://ozwellconsole.os.mieweb.org |
 | `production` | Push a `v*` tag on a `main` commit | https://ozwellmanager.os.mieweb.org |
 
-Release to production:
+Release to production (preferred): **Actions → Deploy → Run workflow** on `main`, pick `patch` / `minor` / `major`. It bumps `package.json`, pushes the `vX.Y.Z` tag, creates a GitHub Release, and deploys.
+
+Or tag manually:
 
 ```bash
 git switch main && git pull

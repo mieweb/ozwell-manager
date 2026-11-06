@@ -2,26 +2,26 @@
 
 ## Required Local Services
 
-Run the backend from the `ozwellai-api` repository on branch `codex/manager-auth-backend`.
+Run the backend from the [`ozwellai-api`](https://github.com/mieweb/ozwellai-api) repository on branch `main`. The commands below assume both repositories are cloned side by side.
 
 Backend API:
 
 ```bash
-cd /Users/adityadamerla/GitHub/ozwellai-api
+cd ../ozwellai-api
 npm run dev
 ```
 
 Local manager auth proxy:
 
 ```bash
-cd /Users/adityadamerla/GitHub/ozwellai-api
+cd ../ozwellai-api
 node scripts/dev/manager-auth-proxy.js
 ```
 
 Frontend:
 
 ```bash
-cd /Users/adityadamerla/GitHub/ozwell-manager
+cd ../ozwell-manager
 npm run dev -- --port 5174
 ```
 
